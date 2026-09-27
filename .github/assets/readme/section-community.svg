@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="72" viewBox="0 0 720 72" role="img" aria-labelledby="title desc">
+  <title id="title">Project and community</title>
+  <desc id="desc">Discord MCP section 06: Project and community.</desc>
+  <defs>
+    <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#3730a3"/>
+      <stop offset="1" stop-color="#5865f2"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="20" width="696" height="44" rx="22" fill="url(#bar)"/>
+  <path d="M2 42h22m10 0h14m-7-7 7 7-7 7" fill="none" stroke="#67e8f9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="80" y="49" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="600" fill="#e0e7ff" text-anchor="middle">06</text>
+  <text x="360" y="51" font-family="Segoe UI, Arial, sans-serif" font-size="26" font-weight="700" fill="#fff" text-anchor="middle">Project and community</text>
+  <g stroke="#c7d2fe" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="654" y="9" width="34" height="26" rx="9" fill="#1e1b4b"/>
+    <path d="M671 4v5m-24 12h7m34 0h7" fill="none"/>
+    <path d="M662 35v5m18-5v5" stroke="#67e8f9"/>
+  </g>
+  <circle cx="671" cy="3" r="3" fill="#67e8f9"/>
+  <g fill="#67e8f9"><circle cx="665" cy="21" r="2.5"/><circle cx="677" cy="21" r="2.5"/></g>
+  <path d="M667 28h8M700 8v8m-4-4h8" stroke="#c7d2fe" stroke-width="2" stroke-linecap="round"/>
+</svg>

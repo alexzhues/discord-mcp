@@ -607,7 +607,11 @@ describe('handwritten docs do not regress to known stale contracts', () => {
     expect(readme).toContain('real local MCP catalog');
     expect(homepage).toContain('real MCP catalog');
     expect(llms).toContain('real MCP catalog');
-    for (const [name, source] of Object.entries({ readme, installation, llms })) {
+    // Keep the full JSON contract in reference material; the README links to it.
+    expect(readme).toContain(
+      'https://cappyeo.github.io/discord-mcp/start/installation/#optional-catalog-check',
+    );
+    for (const [name, source] of Object.entries({ installation, llms })) {
       expect(source, `${name} must document the catalog-check schema`).toContain(
         'discord-mcp.catalog-check.v1',
       );
