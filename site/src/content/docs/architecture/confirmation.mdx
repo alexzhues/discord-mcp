@@ -9,7 +9,7 @@ import { Aside } from '@astrojs/starlight/components';
 
 discord-mcp's confirmation contract is a **mechanical two-key guard** for
 selected high-risk operations. A tool that declares the `confirm_required`
-precondition - **31 of the 209 tools**, listed
+precondition - **31 of the 221 tools**, listed
 [below](#which-tools-require-it) - does not fire unless **both** of these
 hold at the same time:
 
@@ -37,13 +37,19 @@ Discord. A later call executes only when all four conditions hold:
 4. `__confirm_id` exactly matches the unconsumed `approval_id` from that preview
    and has not expired.
 
+`messages_publish` and `messages_update` use the same payload-bound approval
+contract. Their previews include the planned message parts and safe file metadata;
+file bytes are replaced by hashes. Approval also binds the channel and, for an
+update, the message ID. See the [rich message composer](../../operations/message-composer/)
+for the draft, publish, and update workflow.
+
 If the payload changes, the server returns `PAYLOAD_CONFIRMATION_MISMATCH`
 and refuses the request. The digest excludes only the three authorization fields,
 so channel/message targets and every component value remain bound to the
 approval. For template sends, the digest covers the fully interpolated tree.
 When `DISCORD_EXPECTED_BOT_ID` is configured, the approval record also binds to
 that exact bot identity; an embedding that tries to apply it through another
-bot-scoped server fails closed. The preview intentionally omits untrusted text
+bot-scoped server fails closed. The Components V2 preview intentionally omits untrusted text
 and raw identifiers;
 the caller approves the exact payload it supplied, using the digest as the
 binding. Use `MCP_WRITE_MODE=preview` to block any other ordinary writes at
@@ -60,8 +66,8 @@ outcome before requesting a new approval; do not blindly replay the old one.
 
 Tools that do **not** declare the precondition - including ordinary mutations
 like `messages_send` and `members_add_role` - are generally unaffected by both
-halves and execute immediately; the Components V2 tools are the explicit
-payload-bound exception.
+halves and execute immediately; the Components V2 and composer write tools are
+the explicit payload-bound exceptions.
 
 Source: [`packages/mcp-core/src/preconditions/ConfirmRequired.ts`](https://github.com/cappyeo/discord-mcp/blob/main/packages/mcp-core/src/preconditions/ConfirmRequired.ts).
 
@@ -215,7 +221,7 @@ There is **no automatic rule**. `confirm_required` is attached explicitly,
 per tool, in each tool's own `defineTool({ preconditions: ['confirm_required'] })`
 call. A tool is gated if and only if it names the precondition itself.
 
-The current source registry has exactly **31 tools** out of 209 - every irreversible
+The current source registry has exactly **31 tools** out of 221 - every irreversible
 delete, plus ban / kick / prune / leave-guild and the two command
 bulk-overwrites (which replace a guild's entire command set in one call):
 
@@ -242,6 +248,9 @@ bulk-overwrites (which replace a guild's entire command set in one call):
 | `templates` | `templates_delete` |
 | `users` | `users_leave_guild` |
 | `webhooks` | `webhooks_delete`, `webhooks_delete_message`, `webhooks_delete_with_token` |
+
+The payload-bound guild change flow uses the separate exact-plan review contract in
+`guild_change_apply` and `guild_change_restore`.
 
 Every auto-generated [tool reference page](/discord-mcp/tools/) carries a
 **Confirmation required** row in its Annotations table, which is rendered

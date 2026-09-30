@@ -26,6 +26,7 @@ import { interpolateTemplate } from '../tools/components-v2/_lib/interpolate.js'
 import { ComponentTypeId } from '../tools/components-v2/_lib/schema.js';
 import { validateComponentsV2 } from '../tools/components-v2/_lib/validator.js';
 import { TEMPLATES } from '../tools/components-v2/templates/index.js';
+import { composeMessage } from '../tools/messages/_lib/composer.js';
 import type { MiddlewareContext, ToolMiddleware } from './compose.js';
 
 const PAYLOAD_CONFIRMATION_KIND = 'payload_hash' as const;
@@ -33,7 +34,10 @@ const PAYLOAD_CONFIRMATION_TOOL_NAMES = new Set([
   'components_v2_send',
   'components_v2_edit',
   'components_v2_send_from_template',
+  'messages_publish',
+  'messages_update',
 ]);
+const COMPOSER_TOOL_NAMES = new Set(['messages_publish', 'messages_update']);
 const HASH_RE = /^[a-f0-9]{64}$/u;
 const INTERACTIVE_TYPES = new Set<number>([
   ComponentTypeId.Button,
@@ -443,9 +447,17 @@ function isValidFileRecord(value: unknown): value is FileApprovalRecord {
 }
 
 function canonicalTarget(args: Record<string, unknown>, toolName: string): string {
+  if (toolName === 'guild_change_apply' || toolName === 'guild_change_restore')
+    return JSON.stringify({
+      guild_id: args.guild_id ?? null,
+      expected_bot_id: args.expected_bot_id ?? null,
+      plan_ref: args.plan_ref ?? null,
+    });
   return JSON.stringify({
     channel_id: args.channel_id ?? null,
-    ...(toolName === 'components_v2_edit' ? { message_id: args.message_id ?? null } : {}),
+    ...(['components_v2_edit', 'messages_update'].includes(toolName)
+      ? { message_id: args.message_id ?? null }
+      : {}),
   });
 }
 
@@ -556,6 +568,40 @@ export function assessComponentsV2Payload(
   return { componentCount: components.length, riskFlags };
 }
 
+function assessComposerPayload(args: Record<string, unknown>): ComponentsV2RiskAssessment {
+  const components = Array.isArray(args.components) ? args.components : [];
+  const state = { externalUrl: false, interactive: false };
+  inspectValue(
+    {
+      embeds: args.embeds,
+      components,
+      poll: args.poll,
+    },
+    state,
+  );
+  const riskFlags: string[] = [];
+  if (args.files !== undefined) riskFlags.push('files');
+  if (args.poll !== undefined) riskFlags.push('poll');
+  if (args.allowed_mentions !== undefined) riskFlags.push('allowed_mentions');
+  if (state.externalUrl) riskFlags.push('external_urls');
+  if (state.interactive) riskFlags.push('interactive_components');
+  if (args.message_id !== undefined) riskFlags.push('edit_existing_message');
+  return { componentCount: components.length, riskFlags };
+}
+
+function composerFingerprint(
+  args: Record<string, unknown>,
+  toolName: string,
+): Record<string, unknown> {
+  const { channel_id: _channelId, message_id: _messageId, ...body } = args;
+  const composed = composeMessage(body, { edit: toolName === 'messages_update' });
+  return {
+    channel_id: args.channel_id ?? null,
+    ...(toolName === 'messages_update' ? { message_id: args.message_id ?? null } : {}),
+    composer: composed.fingerprint,
+  };
+}
+
 function getRawArgs(ctx: MiddlewareContext<unknown>): Record<string, unknown> {
   const raw = ctx.meta.get('rawArgs');
   return isRecord(raw) ? raw : {};
@@ -573,11 +619,22 @@ function buildPreview(
   delete payload.__confirm;
   delete payload.__confirm_hash;
   delete payload.__confirm_id;
+  const draftPreview = COMPOSER_TOOL_NAMES.has(toolName)
+    ? (() => {
+        const { channel_id: _channelId, message_id: _messageId, ...body } = args;
+        // composerFingerprint already validated this exact body before an
+        // approval was issued. Keep the preview bounded to the helper's safe
+        // content/file metadata projection and never include data_uri bytes.
+        return composeMessage(body, { edit: toolName === 'messages_update' }).preview;
+      })()
+    : undefined;
   return {
     tool: toolName,
     target: {
       channel_id: args.channel_id ?? null,
-      ...(toolName === 'components_v2_edit' ? { message_id: args.message_id ?? null } : {}),
+      ...(['components_v2_edit', 'messages_update'].includes(toolName)
+        ? { message_id: args.message_id ?? null }
+        : {}),
     },
     component_count: assessment.componentCount,
     risk_flags: [...assessment.riskFlags],
@@ -586,6 +643,7 @@ function buildPreview(
     approval_id: approval.approvalId,
     approval_expires_at: new Date(approval.expiresAt).toISOString(),
     payload,
+    ...(draftPreview === undefined ? {} : { draft_preview: draftPreview }),
   };
 }
 
@@ -651,12 +709,22 @@ export function payloadConfirmationMiddleware(
         return next();
       }
 
-      const args = isRecord(ctx.args) ? ctx.args : {};
-      const validated = validatedComponents(args, ctx.tool.name);
-      const assessment = assessComponentsV2Payload(ctx.tool.name, {
-        ...args,
-        components: validated.components,
-      });
+      const args: Record<string, unknown> = isRecord(ctx.args) ? ctx.args : {};
+      const isComposer = COMPOSER_TOOL_NAMES.has(ctx.tool.name);
+      const validated = isComposer
+        ? {
+            hashArgs: composerFingerprint(args, ctx.tool.name),
+            components: Array.isArray(args.components) ? args.components : [],
+          }
+        : PAYLOAD_CONFIRMATION_TOOL_NAMES.has(ctx.tool.name)
+          ? validatedComponents(args, ctx.tool.name)
+          : { hashArgs: args, components: [] as readonly unknown[] };
+      const assessment = isComposer
+        ? assessComposerPayload(args)
+        : assessComponentsV2Payload(ctx.tool.name, {
+            ...args,
+            components: validated.components,
+          });
       const payloadHash = fingerprintPayload(validated.hashArgs);
       const componentReview = reviewComponentsV2(validated.components);
       const target = canonicalTarget(args, ctx.tool.name);

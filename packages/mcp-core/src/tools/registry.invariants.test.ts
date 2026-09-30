@@ -1,5 +1,5 @@
 /**
- * Registry-wide invariants over all 209 tools.
+ * Registry-wide invariants over all 221 tools.
  *
  * These are the checks that per-tool test files structurally cannot make: a
  * tool that forgets its confirm gate, mislabels itself as read-only, or
@@ -13,7 +13,7 @@
  */
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { DiscordAccessRequirement } from '../access/requirements.js';
 import {
@@ -53,29 +53,33 @@ beforeAll(async () => {
     .filter((e) => e.isDirectory() && !e.name.startsWith('_'))
     .map((e) => e.name);
 
+  const imported: ToolMeta[] = [];
   for (const category of categories) {
     const dir = join(TOOLS_DIR, category);
-    const files = readdirSync(dir).filter(
-      (f) =>
-        f.endsWith('.ts') &&
-        !f.endsWith('.test.ts') &&
-        !f.endsWith('.bench.ts') &&
-        !f.startsWith('_'),
-    );
+    const files = readdirSync(dir)
+      .filter(
+        (f) =>
+          f.endsWith('.ts') &&
+          !f.endsWith('.test.ts') &&
+          !f.endsWith('.bench.ts') &&
+          !f.startsWith('_'),
+      )
+      .sort();
     for (const file of files) {
       const sourcePath = join(dir, file);
-      const mod = await import(`file://${sourcePath.replace(/\\/g, '/')}`);
+      const mod = await import(pathToFileURL(sourcePath).href);
       const meta = (mod.default as { __toolMetadata?: ToolMeta } | undefined)?.__toolMetadata;
-      if (meta === undefined) continue;
-      tools.push({ ...meta, preconditions: meta.preconditions ?? [], sourcePath });
+      if (meta !== undefined) {
+        imported.push({ ...meta, preconditions: meta.preconditions ?? [], sourcePath });
+      }
     }
   }
-  tools = tools.sort((a, b) => a.name.localeCompare(b.name));
+  tools = imported.sort((a, b) => a.name.localeCompare(b.name));
 });
 
 describe('tool registry invariants', () => {
   it('discovers the full advertised tool surface', () => {
-    expect(tools.length).toBe(209);
+    expect(tools.length).toBe(221);
     expect(new Set(tools.map((t) => t.name)).size).toBe(tools.length);
     expect(new Set(tools.map((t) => t.category)).size).toBe(31);
   });
@@ -165,7 +169,7 @@ describe('tool registry invariants', () => {
     // allowlisted rather than "fixed" - the point of the check is to catch a
     // NEW tool landing under the wrong prefix.
     const PREFIX_EXCEPTIONS: Record<string, readonly string[]> = {
-      meta: ['mcp_', 'discord_'],
+      meta: ['mcp_', 'discord_', 'workflow_'],
       monetization: ['entitlements_', 'skus_', 'subscriptions_'],
     };
     for (const t of tools) {

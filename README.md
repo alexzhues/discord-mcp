@@ -4,7 +4,7 @@
 
 <h1 align="center">Discord MCP</h1>
 
-**An open-source Model Context Protocol (MCP) server for Discord.** Connect Claude, Codex, Cursor, and other MCP-compatible AI clients to your own Discord bot. Manage messages, channels, roles, moderation, and server setup through 209 typed tools.
+**An open-source Model Context Protocol (MCP) server for Discord.** Connect Claude, Codex, Cursor, and other MCP-compatible AI clients to your own Discord bot. Manage messages, channels, roles, moderation, and server setup through 221 typed tools.
 
 [![CI status](https://github.com/cappyeo/discord-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/cappyeo/discord-mcp/actions/workflows/ci.yml) [![npm version](https://img.shields.io/npm/v/%40discord-mcp%2Fcli?label=npm)](https://www.npmjs.com/package/@discord-mcp/cli) [![Required Node.js version](https://img.shields.io/node/v/%40discord-mcp%2Fcli)](https://www.npmjs.com/package/@discord-mcp/cli) [![Apache-2.0 license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
@@ -36,6 +36,9 @@ Watch an AI agent build a gaming community: channels, roles, onboarding, AutoMod
 | Moderate a server | Permission checks, role audits, bans, and AutoMod |
 | Build a server from a prompt | A blueprint to preview and approve, resumable execution, and final Discord readback |
 | Extend your bot | Slash commands, interactions, webhooks, and application emojis |
+| Improve an existing server | Preview bounded edits, inspect member access, preserve IDs, resume, and restore selected configuration changes |
+| Read a conversation with sources | Gather bounded channel/thread history and replies with Discord citations and explicit coverage |
+| Run a background workflow | Start a durable sequence, inspect progress, cancel cooperatively, and resume after reviewing checkpoints |
 
 For a complete server build, <a href="https://cappyeo.github.io/discord-mcp/start/activity-evidence/"><strong>Get a verified result</strong></a>: review the plan, approve it, then inspect Activity Evidence from the final readback.
 
@@ -84,6 +87,8 @@ See [client setup](https://cappyeo.github.io/discord-mcp/start/client-setup/) fo
 | Find a tool or workflow | [Tool reference](https://cappyeo.github.io/discord-mcp/tools/) · [Recipes](https://cappyeo.github.io/discord-mcp/recipes/) |
 | Configure and operate | [Configuration](https://cappyeo.github.io/discord-mcp/operations/configure/) · [CLI commands](https://cappyeo.github.io/discord-mcp/reference/cli/) |
 | Build or migrate a server | [Blueprint workflow](https://cappyeo.github.io/discord-mcp/operations/blueprints/) · [Migration guides](https://cappyeo.github.io/discord-mcp/migrate/) |
+| Improve an existing server | [Change plans and member access](https://cappyeo.github.io/discord-mcp/operations/server-changes/) |
+| Read conversations or run background work | [Cited context](https://cappyeo.github.io/discord-mcp/operations/conversation-context/) · [Durable workflows](https://cappyeo.github.io/discord-mcp/operations/workflows/) |
 | Build an integration | [Architecture](https://cappyeo.github.io/discord-mcp/architecture/) · [@discord-mcp/core](https://www.npmjs.com/package/@discord-mcp/core) |
 
 <details>

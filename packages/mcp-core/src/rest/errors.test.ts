@@ -74,6 +74,28 @@ describe('classifyDiscordError (Plan 8 C.2)', () => {
     expect(classifyDiscordError(err)).toBeInstanceOf(DiscordRetryableError);
   });
 
+  it('does not replay ambiguous multipart PATCH failures', () => {
+    const err = makeApiError(503);
+    expect(classifyDiscordError(err, { method: 'patch', hasFiles: true })).toMatchObject({
+      replaySafe: false,
+    });
+    expect(classifyDiscordError(err, { method: 'patch', hasFiles: false })).toMatchObject({
+      replaySafe: true,
+    });
+  });
+
+  it('keeps multipart PATCH rate limits and pre-send network failures replay-safe', () => {
+    const rateLimited = classifyDiscordError(makeApiError(429), {
+      method: 'patch',
+      hasFiles: true,
+    });
+    expect(rateLimited?.replaySafe).toBe(true);
+    const preSend = Object.assign(new Error('dns'), { code: 'ENOTFOUND' });
+    expect(classifyDiscordError(preSend, { method: 'patch', hasFiles: true })?.replaySafe).toBe(
+      true,
+    );
+  });
+
   it('returns null for DiscordAPIError 400 (validation)', () => {
     const err = makeApiError(400);
     expect(classifyDiscordError(err)).toBeNull();

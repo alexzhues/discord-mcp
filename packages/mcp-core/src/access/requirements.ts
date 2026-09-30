@@ -14,6 +14,7 @@ export const DISCORD_PERMISSION_NAMES = [
   'VIEW_CHANNEL',
   'CREATE_INSTANT_INVITE',
   'SEND_MESSAGES',
+  'SEND_TTS_MESSAGES',
   'SEND_MESSAGES_IN_THREADS',
   'READ_MESSAGE_HISTORY',
   'ADD_REACTIONS',
@@ -59,6 +60,7 @@ export const DISCORD_PERMISSION_BITS: Readonly<Record<DiscordPermissionName, big
   VIEW_CHANNEL: PermissionFlagsBits.ViewChannel,
   CREATE_INSTANT_INVITE: PermissionFlagsBits.CreateInstantInvite,
   SEND_MESSAGES: PermissionFlagsBits.SendMessages,
+  SEND_TTS_MESSAGES: PermissionFlagsBits.SendTTSMessages,
   SEND_MESSAGES_IN_THREADS: PermissionFlagsBits.SendMessagesInThreads,
   READ_MESSAGE_HISTORY: PermissionFlagsBits.ReadMessageHistory,
   ADD_REACTIONS: PermissionFlagsBits.AddReactions,
@@ -175,6 +177,26 @@ export const CHANNEL_WRITE_ACCESS = {
   scope: 'channel',
   hierarchy: 'not_applicable',
 } as const satisfies DiscordAccessRequirement;
+
+export const COMPOSER_PUBLISH_ACCESS = {
+  ...CHANNEL_WRITE_ACCESS,
+  permissions: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY'],
+  conditions: [
+    { fields: ['embeds'], permissions: ['EMBED_LINKS'] },
+    { fields: ['files'], permissions: ['ATTACH_FILES'] },
+    { fields: ['poll'], permissions: ['SEND_POLLS'] },
+    { fields: ['tts'], permissions: ['SEND_TTS_MESSAGES'], when: { tts: true } },
+  ],
+} as const satisfies DiscordAccessRequirement;
+
+export const COMPOSER_UPDATE_ACCESS = {
+  ...COMPOSER_PUBLISH_ACCESS,
+  conditions: COMPOSER_PUBLISH_ACCESS.conditions.filter(
+    (condition) =>
+      !(condition.fields as readonly string[]).includes('poll') &&
+      !(condition.fields as readonly string[]).includes('tts'),
+  ),
+} satisfies DiscordAccessRequirement;
 
 /** Operations that never contact Discord (builders, validators, and planners). */
 export const LOCAL_ACCESS = {
@@ -507,10 +529,14 @@ const TOOL_REQUIREMENTS: Readonly<Record<string, DiscordAccessRequirement>> = {
   messages_bulk_delete: channel(['MANAGE_MESSAGES']),
   messages_delete: channel(['MANAGE_MESSAGES']),
   messages_send: channel(['VIEW_CHANNEL', 'SEND_MESSAGES']),
+  messages_compose: LOCAL_ACCESS,
+  messages_publish: COMPOSER_PUBLISH_ACCESS,
+  messages_update: COMPOSER_UPDATE_ACCESS,
   messages_pin: channel(['PIN_MESSAGES']),
   messages_unpin: channel(['PIN_MESSAGES']),
   messages_get: messageRead,
   messages_read: messageRead,
+  messages_context: messageRead,
   messages_search_recent: messageRead,
   messages_list_pins: messageRead,
   messages_edit: messageModerate,
@@ -586,6 +612,9 @@ const TOOL_REQUIREMENTS: Readonly<Record<string, DiscordAccessRequirement>> = {
   guild_blueprint_plan: BLUEPRINT_GUILD_ACCESS,
   guild_blueprint_apply: BLUEPRINT_GUILD_ACCESS,
   guild_blueprint_evidence: BLUEPRINT_GUILD_ACCESS,
+  guild_change_plan: GUILD_READ_ACCESS,
+  guild_change_apply: BLUEPRINT_GUILD_ACCESS,
+  guild_change_restore: BLUEPRINT_GUILD_ACCESS,
   users_get_current: BOT_APPLICATION_READ_ACCESS,
   users_modify_current: BOT_APPLICATION_ACCESS,
   users_list_current_user_guilds: globalBotRead(),
@@ -618,12 +647,17 @@ const TOOL_REQUIREMENTS: Readonly<Record<string, DiscordAccessRequirement>> = {
   users_create_dm: USER_SCOPED_ACCESS,
   permissions_audit_channel: channelRead,
   permissions_explain: GUILD_READ_ACCESS,
+  permissions_member_access_report: GUILD_READ_ACCESS,
   intelligence_classify_messages: messageRead,
   intelligence_draft_response: messageRead,
   intelligence_extract_entities: messageRead,
   intelligence_summarize_channel: messageRead,
   intelligence_moderate_content: EXTERNAL_ACCESS,
   mcp_pipeline: LOCAL_ACCESS,
+  workflow_start: LOCAL_ACCESS,
+  workflow_status: LOCAL_ACCESS,
+  workflow_resume: LOCAL_ACCESS,
+  workflow_cancel: LOCAL_ACCESS,
   threads_list_members: guild([], ['GUILD_MEMBERS']),
 };
 

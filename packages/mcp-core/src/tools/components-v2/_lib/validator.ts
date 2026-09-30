@@ -69,7 +69,14 @@ function collectUnknownTypes(nodes: readonly Node[], path: string, out: Validato
   });
 }
 
-export function validateComponentsV2(input: unknown): ValidatorResult {
+export function validateComponentsV2(
+  input: unknown,
+  options: {
+    readonly attachmentNames?: readonly string[];
+    /** Permit syntactically valid File nodes whose old attachments are checked by the caller. */
+    readonly allowFileAttachments?: boolean;
+  } = {},
+): ValidatorResult {
   const issues: ValidatorIssue[] = [];
   const components = toNodes(input);
 
@@ -162,14 +169,31 @@ export function validateComponentsV2(input: unknown): ValidatorResult {
       }
 
       if (node.type === ComponentTypeId.File) {
-        issues.push({
-          path: here,
-          code: 'FILE_UNSUPPORTED',
-          message:
-            'File components require a matching attachment upload, which components_v2_send/edit do not accept.',
-          fix_hint:
-            'Remove the File component or send the attachment through another Discord route.',
-        });
+        const fileUrl = node.file?.url;
+        const name =
+          typeof fileUrl === 'string' && fileUrl.startsWith('attachment://')
+            ? fileUrl.slice('attachment://'.length)
+            : null;
+        if (options.attachmentNames === undefined) {
+          issues.push({
+            path: here,
+            code: 'FILE_UNSUPPORTED',
+            message:
+              'File components require a matching attachment upload, which components_v2_send/edit do not accept.',
+            fix_hint:
+              'Remove the File component or send the attachment through another Discord route.',
+          });
+        } else if (
+          name === null ||
+          (!options.allowFileAttachments && !options.attachmentNames.includes(name))
+        ) {
+          issues.push({
+            path: `${here}.file.url`,
+            code: 'FILE_ATTACHMENT_MISSING',
+            message: 'File component must reference one of the supplied attachment filenames.',
+            fix_hint: 'Supply the matching file or remove this File component.',
+          });
+        }
       }
 
       if (node.type === ComponentTypeId.Section) {

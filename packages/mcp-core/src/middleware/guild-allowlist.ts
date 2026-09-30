@@ -151,7 +151,12 @@ export function hasVerifiableGuildScope(
   toolName: string,
   inputSchema: Readonly<Record<string, unknown>>,
 ): boolean {
-  if (toolName === 'mcp_pipeline' || GUILD_SCOPE_BLOCKED_TOOLS.has(toolName)) return true;
+  if (
+    toolName === 'mcp_pipeline' ||
+    toolName.startsWith('workflow_') ||
+    GUILD_SCOPE_BLOCKED_TOOLS.has(toolName)
+  )
+    return true;
   if (Object.hasOwn(inputSchema, 'guild_id') || Object.hasOwn(inputSchema, 'webhook_id')) {
     return true;
   }

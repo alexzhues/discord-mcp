@@ -36,7 +36,7 @@ describe('MCP Apps blueprint preview', () => {
     const { client, makeRequest } = await connect(surface);
     try {
       const { tools } = await client.listTools();
-      expect(tools).toHaveLength(surface === 'full' ? 209 : 7);
+      expect(tools).toHaveLength(surface === 'full' ? 221 : 7);
       const name = surface === 'full' ? 'guild_blueprint_plan' : 'build_discord_server';
       expect(tools.find((tool) => tool.name === name)?._meta).toMatchObject({
         ui: { resourceUri: BLUEPRINT_PREVIEW_RESOURCE_URI },
@@ -73,14 +73,16 @@ describe('MCP Apps blueprint preview', () => {
     }
   });
 
-  it('does not expose the preview when guild tools are excluded by category policy', async () => {
+  it('keeps the conversation preview available without exposing excluded guild tools', async () => {
     const { client, makeRequest } = await connect('progressive', 'messages');
     try {
       const resources = await client.listResources();
       expect(
         resources.resources.some((resource) => resource.uri === BLUEPRINT_PREVIEW_RESOURCE_URI),
-      ).toBe(false);
-      await expect(client.readResource({ uri: BLUEPRINT_PREVIEW_RESOURCE_URI })).rejects.toThrow();
+      ).toBe(true);
+      await client.readResource({ uri: BLUEPRINT_PREVIEW_RESOURCE_URI });
+      const tools = (await client.listTools()).tools;
+      expect(tools.some((tool) => tool.name === 'guild_change_plan')).toBe(false);
       expect(makeRequest).not.toHaveBeenCalled();
     } finally {
       await client.close();
@@ -119,7 +121,7 @@ describe('MCP Apps blueprint preview', () => {
       }
       const [textList, uiList] = await Promise.all(clients.map((client) => client.listTools()));
       expect(textList).toEqual(uiList);
-      expect(uiList!.tools).toHaveLength(209);
+      expect(uiList!.tools).toHaveLength(221);
       const read = await clients[1]!.readResource({ uri: BLUEPRINT_PREVIEW_RESOURCE_URI });
       expect(read.contents[0]!.text).toContain('<!doctype html>');
       const result = await clients[1]!.callTool({ name: 'guild_blueprint_plan', arguments: {} });

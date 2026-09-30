@@ -124,15 +124,17 @@ describe('ComponentV2 discriminated union', () => {
     );
   });
 
-  it('rejects child-only and attachment-backed components at the top level', () => {
+  it('rejects child-only components while accepting a top-level File shape', () => {
     for (const component of [
       { type: 2, style: 1, custom_id: 'button' },
       { type: 3, custom_id: 'select', options: [{ label: 'One', value: 'one' }] },
       { type: 11, media: { url: 'https://example.com/thumb.png' } },
-      { type: 13, file: { url: 'attachment://report.pdf' } },
     ]) {
       expect(ComponentsV2Array.safeParse([component]).success).toBe(false);
     }
+    expect(
+      ComponentsV2Array.safeParse([{ type: 13, file: { url: 'attachment://report.pdf' } }]).success,
+    ).toBe(true);
   });
 
   it('ComponentsV2Array accepts 1-40 items', () => {

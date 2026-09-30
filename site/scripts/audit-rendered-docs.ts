@@ -74,7 +74,7 @@ const routes: RouteAudit[] = [
   {
     name: 'homepage',
     path: '/',
-    expectedText: ['Discord MCP Server', 'Get a verified result', '209 tools'],
+    expectedText: ['Discord MCP Server', 'Get a verified result', '221 tools'],
     verify: async (page) => {
       await requireCount(
         page.getByRole('heading', { level: 1, name: 'Discord MCP Server', exact: true }),
@@ -262,7 +262,7 @@ const routes: RouteAudit[] = [
       const search = page.getByRole('searchbox', { name: 'Find a tool' });
       await requireCount(search, 1, 'named tool search');
       await search.fill('messages_send');
-      await page.getByText('Showing 1 of 12 tools', { exact: true }).waitFor();
+      await page.getByText('Showing 1 of 16 tools', { exact: true }).waitFor();
       await requireCount(page.locator('.catalog-list > li:visible'), 1, 'filtered tool result');
       await search.fill('');
     },

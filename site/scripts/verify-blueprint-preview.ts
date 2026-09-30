@@ -40,7 +40,7 @@ async function createHost(page: Page, html: string, width: number, height: numbe
             id: message.id,
             result: {
               protocolVersion: '2026-01-26',
-              hostCapabilities: {},
+              hostCapabilities: { serverTools: {} },
               hostContext: {},
               hostInfo: { name: 'discord-mcp-qa-host', version: '1.0.0' },
             },
@@ -51,6 +51,26 @@ async function createHost(page: Page, html: string, width: number, height: numbe
       if (message?.method === 'ui/message') {
         event.source?.postMessage(
           { jsonrpc: '2.0', id: message.id, result: host.rejectNext ? { isError: true } : {} },
+          { targetOrigin: '*' },
+        );
+      }
+      if (message?.method === 'tools/call') {
+        event.source?.postMessage(
+          {
+            jsonrpc: '2.0',
+            id: message.id,
+            result: {
+              content: [],
+              structuredContent: {
+                id: 'wf_' + 'a'.repeat(32),
+                status: 'completed',
+                target: { profile_id: 'qa' },
+                completed_steps: 2,
+                total_steps: 2,
+                updated_at: '2026-10-01T00:00:00Z',
+              },
+            },
+          },
           { targetOrigin: '*' },
         );
       }
@@ -232,6 +252,109 @@ try {
     errorText.includes('BOT_MISMATCH') && errorText.includes('Select profile'),
     'error code and recovery hint render',
   );
+  await postToolResult(
+    desktop,
+    {
+      content: [],
+      structuredContent: {
+        status: 'ready',
+        plan_id: planId,
+        snapshot_id: planId,
+        blockers: [],
+        risks: ['Permissions change'],
+        plan_ref: 'private-change-ref',
+        approval_id: 'private-change-approval',
+        operations: [
+          {
+            kind: 'channel_patch',
+            resource_id: '111111111111111111',
+            before: { name: 'old', topic: 'keep' },
+            after: { name: '<img src=x onerror=window.__xss=1>', topic: 'keep' },
+          },
+        ],
+      },
+    },
+    'Existing server changes',
+  );
+  const changeText = await frame(desktop).locator('body').innerText();
+  check(
+    changeText.includes('Before') && changeText.includes('After') && changeText.includes('keep'),
+    'existing changes show before and after',
+  );
+  check(
+    !changeText.includes('private-change-ref') && !changeText.includes('private-change-approval'),
+    'change preview omits private plan credentials',
+  );
+  check(
+    await frame(desktop).getByRole('button', { name: 'Request change review' }).isEnabled(),
+    'ready change plan requests host review',
+  );
+
+  await postToolResult(
+    desktop,
+    {
+      content: [],
+      structuredContent: {
+        scope: { channel_id: '111111111111111111', scope: 'thread' },
+        returned_count: 2,
+        scanned_count: 4,
+        pages_scanned: 1,
+        coverage: { partial: true, direction: 'older', reasons: ['Unreadable reply'] },
+        next_cursor: '222222222222222222',
+        messages: [
+          {
+            id: '222222222222222222',
+            content: '<script>window.__xss=2</script>',
+            citation: {
+              jump_url:
+                'https://discord.com/channels/333333333333333333/111111111111111111/222222222222222222',
+            },
+          },
+          {
+            id: '444444444444444444',
+            content: 'unsafe link',
+            citation: { jump_url: 'javascript:alert(1)' },
+          },
+        ],
+      },
+    },
+    'Conversation context',
+  );
+  check(
+    (await frame(desktop).getByRole('link').count()) === 1,
+    'context allows only canonical Discord citation links',
+  );
+  check(
+    (await frame(desktop).locator('body').innerText()).includes('<script>window.__xss=2</script>'),
+    'conversation content is escaped text',
+  );
+  check(
+    (await frame(desktop).locator('body').innerText()).includes('Partial context'),
+    'context shows incomplete coverage',
+  );
+
+  await postToolResult(
+    desktop,
+    {
+      content: [],
+      structuredContent: {
+        id: 'wf_' + 'a'.repeat(32),
+        status: 'running',
+        target: { profile_id: 'qa' },
+        completed_steps: 1,
+        total_steps: 2,
+        updated_at: '2026-10-01T00:00:00Z',
+      },
+    },
+    'Background workflow',
+  );
+  await frame(desktop).getByRole('button', { name: 'Refresh progress' }).click();
+  await frame(desktop).getByText('2 / 2 steps completed').waitFor();
+  check(
+    (await frame(desktop).locator('body').innerText()).includes('completed'),
+    'workflow refresh uses read-only status tool',
+  );
+  check(desktopRequests.length === 0, 'all operation views remain offline');
   await desktop.close();
 
   const mobile = await browser.newPage();

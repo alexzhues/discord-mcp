@@ -172,6 +172,7 @@ const TopLevelComponent = z.union([
   TextDisplay,
   MediaGallery,
   Separator,
+  File,
   Container as z.ZodType<{ type: 17 } & Record<string, unknown>>,
 ]);
 

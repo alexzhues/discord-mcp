@@ -35,6 +35,8 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build
+      - name: Verify durable workflow integration
+        run: node packages/mcp-core/scripts/verify-workflows.mjs
       - run: pnpm test
       - run: pnpm --filter @discord-mcp/core exec vitest run --coverage
       - run: pnpm exec publint --strict packages/mcp-core
