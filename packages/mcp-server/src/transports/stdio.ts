@@ -1,4 +1,6 @@
 import {
+  type BuildServerDeps,
+  type BuildServerResult,
   buildPolicy,
   buildServer,
   createAuditSink,
@@ -12,7 +14,7 @@ import {
 } from '@discord-mcp/core';
 import { REST } from '@discordjs/rest';
 import type { Transport } from '@modelcontextprotocol/server';
-import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { type StdioServerHandle, serveStdio } from '@modelcontextprotocol/server/stdio';
 import { recordBlueprintActivity } from '../lib/activity.js';
 import type { OtelHandle } from '../otel.js';
 
@@ -29,6 +31,7 @@ export async function startStdio(
   const config = loadConfig();
   const logger = createLogger(config);
   const ownsProcess = opts.transport === undefined && opts.registerSignalHandlers !== false;
+  let stdioHandle: StdioServerHandle | undefined;
   let cleanup = async (): Promise<void> => {};
   let shutdownPromise: Promise<void> | undefined;
   let resourcesReady!: () => void;
@@ -150,10 +153,11 @@ export async function startStdio(
           runtimeIntents: { GUILD_MEMBERS: 'missing', MESSAGE_CONTENT: 'missing' },
         });
 
-  const { server, registeredTools, notifyResource, subscriptions, auditSink } = await buildServer({
+  const buildServerDeps: BuildServerDeps = {
     rest,
     logger,
     config,
+    enableResourceSubscriptions: true,
     auditSink: configuredAuditSink,
     ...(runtimeAccessResolver === undefined ? {} : { runtimeAccessResolver }),
     ...(payloadApprovalLedger === undefined ? {} : { payloadApprovalLedger }),
@@ -163,7 +167,20 @@ export async function startStdio(
           onRuntimeAccessWarning: (message: string) => logger.warn({ access: 'runtime' }, message),
         }),
     onBlueprintLifecycle: recordBlueprintActivity,
-  });
+  };
+  // Keep one eagerly built instance for the injected transport path and for
+  // boot validation. Real stdio gets a fresh instance for every SDK factory
+  // call, including a discarded modern discover probe before legacy fallback.
+  const initialBuild = await buildServer(buildServerDeps);
+  const serverBuilds: BuildServerResult[] = [initialBuild];
+  let activeBuild = initialBuild;
+  const usedBuilds = new Set<BuildServerResult>();
+  const gatewayRegistry = {
+    has: (uri: string) => activeBuild.subscriptions.has(uri),
+    matchPattern: (pattern: RegExp) => activeBuild.subscriptions.matchPattern(pattern),
+  };
+  const notifyResource = (uri: string): Promise<void> => activeBuild.notifyResource(uri);
+  const { server, registeredTools, auditSink } = activeBuild;
 
   let gatewayClient: GatewayClient | null = null;
   if (config.GATEWAY) {
@@ -171,12 +188,11 @@ export async function startStdio(
       token: config.DISCORD_TOKEN.startsWith('Bot ')
         ? config.DISCORD_TOKEN.slice(4)
         : config.DISCORD_TOKEN,
-      registry: subscriptions,
+      registry: gatewayRegistry as typeof activeBuild.subscriptions,
       notifyResource,
     });
   }
 
-  const transport = opts.transport ?? new StdioServerTransport();
   const closeResource = async (name: string, close: () => Promise<unknown>): Promise<void> => {
     try {
       await close();
@@ -187,7 +203,18 @@ export async function startStdio(
   cleanup = async () => {
     // A stalled Gateway must not block closing MCP or flushing audit data.
     await Promise.all([
-      closeResource('server', () => server.close()),
+      closeResource('server', async () => {
+        if (stdioHandle !== undefined) {
+          await stdioHandle.close();
+          await Promise.all(
+            serverBuilds
+              .filter((build) => !usedBuilds.has(build))
+              .map((build) => build.server.close()),
+          );
+          return;
+        }
+        await server.close();
+      }),
       closeResource('gateway', async () => gatewayClient?.stop()),
       (async () => {
         // Flush audit before OTel because an audit sink may use its exporter.
@@ -202,15 +229,34 @@ export async function startStdio(
     return;
   }
 
-  // Protocol.connect preserves an existing transport callback. Install it
-  // before connect so a close during transport.start() cannot be missed.
-  const transportOnClose = transport.onclose;
-  transport.onclose = () => {
-    transportOnClose?.();
-    void requestShutdown('transport closed');
-  };
   try {
-    await server.connect(transport);
+    if (opts.transport !== undefined) {
+      // Protocol.connect preserves an existing transport callback. Install it
+      // before connect so a close during transport.start() cannot be missed.
+      const transportOnClose = opts.transport.onclose;
+      opts.transport.onclose = () => {
+        transportOnClose?.();
+        void requestShutdown('transport closed');
+      };
+      await server.connect(opts.transport);
+    } else {
+      stdioHandle = serveStdio(
+        async ({ era }) => {
+          const build = await buildServer({
+            ...buildServerDeps,
+            enableResourceSubscriptions: era === 'legacy',
+          });
+          serverBuilds.push(build);
+          activeBuild = build;
+          usedBuilds.add(build);
+          return build.server;
+        },
+        {
+          legacy: 'serve',
+          onerror: (error) => logger.error({ err: error }, 'stdio MCP transport failed'),
+        },
+      );
+    }
   } catch (error) {
     await requestShutdown('startup failure', false);
     throw error;

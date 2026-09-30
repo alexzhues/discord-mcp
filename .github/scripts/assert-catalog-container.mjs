@@ -60,7 +60,7 @@ try {
   assert.ok(tools.some((tool) => tool.name === 'messages_send'));
 
   const { resources } = await client.listResources();
-  assert.equal(resources.length, 6);
+  assert.equal(resources.length, 7);
 
   for (const request of [
     { name: 'guild_get', arguments: { guild_id: '111122223333444455' } },

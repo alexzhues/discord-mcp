@@ -6,6 +6,12 @@ import type { Logger } from 'pino';
 import { z } from 'zod';
 import packageJson from '../package.json' with { type: 'json' };
 import { runWithCtx } from './als/context.js';
+import {
+  BLUEPRINT_PREVIEW_RESOURCE_URI,
+  BLUEPRINT_PREVIEW_UI_META,
+  createBlueprintPreviewResource,
+  MCP_APPS_RESOURCE_MIME_TYPE,
+} from './apps/blueprint-preview.js';
 import { type AuditSink, createAuditSink, NoopAuditSink } from './audit/sink.js';
 import type { Config } from './config.js';
 import { type DiscordRuntime, runWithDiscordRuntime } from './container.js';
@@ -282,6 +288,8 @@ export interface BuildServerDeps {
   runtimeAccessResolver?: import('./access/runtime.js').RuntimeAccessResolver;
   /** Optional warning sink for advisory/warn runtime access gaps. */
   onRuntimeAccessWarning?: (message: string) => void;
+  /** Advertise and serve legacy resource subscriptions (default: true). */
+  enableResourceSubscriptions?: boolean;
   /**
    * Best-effort, already-sanitized observation of a blueprint lifecycle call.
    * The observer must never be required for the MCP result to succeed.
@@ -707,7 +715,7 @@ function listAdvertisedTools(
   visibleTools: McpTool[],
   surface: Config['MCP_TOOL_SURFACE'],
 ): McpTool[] {
-  if (surface === 'full') return visibleTools;
+  if (surface === 'full') return visibleTools.map(withBlueprintPreview);
   const blueprintFrontDoor = visibleTools.find((tool) => tool.name === 'guild_blueprint_plan');
   const blueprintApply = visibleTools.find((tool) => tool.name === 'guild_blueprint_apply');
   const blueprintEvidence = visibleTools.find((tool) => tool.name === 'guild_blueprint_evidence');
@@ -746,8 +754,26 @@ function listAdvertisedTools(
     ...compactBlueprintCompletion,
     PROGRESSIVE_SEARCH_TOOL,
     ...PROGRESSIVE_DISPATCH_TOOLS,
-  ];
+  ].map(withBlueprintPreview);
 }
+
+function withBlueprintPreview(tool: McpTool): McpTool {
+  if (
+    tool.name !== 'guild_blueprint_plan' &&
+    tool.name !== PROGRESSIVE_ARCHITECT_TOOL_NAME &&
+    tool.name !== 'guild_blueprint_evidence'
+  ) {
+    return tool;
+  }
+  return { ...tool, _meta: { ...tool._meta, ...BLUEPRINT_PREVIEW_UI_META } };
+}
+
+const blueprintPreviewListing = {
+  uri: BLUEPRINT_PREVIEW_RESOURCE_URI,
+  name: 'Discord blueprint preview',
+  description: 'Interactive review of a guild blueprint and its verified Activity Evidence.',
+  mimeType: MCP_APPS_RESOURCE_MIME_TYPE,
+};
 
 let sharedToolStorePromise: Promise<ToolStore> | undefined;
 
@@ -1584,6 +1610,7 @@ function getSharedToolStore(): Promise<ToolStore> {
 
 export async function buildServer(deps: BuildServerDeps): Promise<BuildServerResult> {
   const transport = deps.transport ?? 'stdio';
+  const enableResourceSubscriptions = deps.enableResourceSubscriptions ?? true;
   await verifyExpectedBotIdentity(deps.rest, deps.config.DISCORD_EXPECTED_BOT_ID);
   // Do not write these dependencies into a process-wide singleton. Every MCP
   // tool still accesses Sapphire's `container`, but its fields are now backed
@@ -1785,7 +1812,11 @@ export async function buildServer(deps: BuildServerDeps): Promise<BuildServerRes
   const server = new Server(
     { name: 'discord-mcp', version: packageJson.version },
     {
-      capabilities: { tools: {}, resources: { subscribe: true } },
+      capabilities: {
+        tools: {},
+        resources: enableResourceSubscriptions ? { subscribe: true } : {},
+        ...(hasBlueprintFrontDoor ? { extensions: { 'io.modelcontextprotocol/ui': {} } } : {}),
+      },
       cacheHints: { 'tools/list': { ttlMs: 3_600_000, cacheScope: 'private' } },
       // Injected into the agent's system context on every initialize. Keep it
       // short and true - it is read by the model before any tools/list.
@@ -1987,11 +2018,19 @@ export async function buildServer(deps: BuildServerDeps): Promise<BuildServerRes
 
   server.setRequestHandler('resources/list', async () => {
     const resources = await resourceStore.list();
-    return { resources: resources.map((r) => ({ ...r })) };
+    return {
+      resources: [
+        ...resources.map((r) => ({ ...r })),
+        ...(hasBlueprintFrontDoor ? [blueprintPreviewListing] : []),
+      ],
+    };
   });
 
   server.setRequestHandler('resources/read', async (req) => {
     try {
+      if (hasBlueprintFrontDoor && req.params.uri === BLUEPRINT_PREVIEW_RESOURCE_URI) {
+        return { contents: [createBlueprintPreviewResource()] };
+      }
       const content = await resourceStore.read(req.params.uri);
       if (content === null) {
         throw new Error(`Resource not found: ${req.params.uri}`);
@@ -2008,30 +2047,33 @@ export async function buildServer(deps: BuildServerDeps): Promise<BuildServerRes
 
   const subscriptions = new SubscriptionRegistry();
 
-  server.setRequestHandler('resources/subscribe', async (req) => {
-    try {
-      await guildScopePolicy.authorizeSubscription(req.params.uri);
-      subscriptions.subscribe(req.params.uri);
-      return {};
-    } catch (error) {
-      throw new Error(
-        (
-          formatErrorForUser(error, { toolName: 'resources/subscribe', transport }).content[0] as {
-            text?: string;
-          }
-        )?.text ?? 'Resource subscription rejected',
-      );
-    }
-  });
+  if (enableResourceSubscriptions) {
+    server.setRequestHandler('resources/subscribe', async (req) => {
+      try {
+        await guildScopePolicy.authorizeSubscription(req.params.uri);
+        subscriptions.subscribe(req.params.uri);
+        return {};
+      } catch (error) {
+        throw new Error(
+          (
+            formatErrorForUser(error, { toolName: 'resources/subscribe', transport })
+              .content[0] as {
+              text?: string;
+            }
+          )?.text ?? 'Resource subscription rejected',
+        );
+      }
+    });
 
-  server.setRequestHandler('resources/unsubscribe', async (req) => {
-    subscriptions.unsubscribe(req.params.uri);
-    return {};
-  });
+    server.setRequestHandler('resources/unsubscribe', async (req) => {
+      subscriptions.unsubscribe(req.params.uri);
+      return {};
+    });
+  }
 
   const notifyResource = async (uri: string): Promise<void> => {
     resourceStore.invalidate(uri);
-    if (subscriptions.has(uri)) {
+    if (enableResourceSubscriptions && subscriptions.has(uri)) {
       await server.sendResourceUpdated({ uri });
     }
   };
@@ -2062,7 +2104,10 @@ const CATALOG_ONLY_ERROR = {
  * catalog handlers.  In particular, no `Config` is created and no ambient
  * process environment is consulted here.
  */
-export async function buildCatalogServer(): Promise<BuildCatalogServerResult> {
+export async function buildCatalogServer(
+  options: { enableResourceSubscriptions?: boolean } = {},
+): Promise<BuildCatalogServerResult> {
+  const enableResourceSubscriptions = options.enableResourceSubscriptions ?? true;
   const toolStore = await getSharedToolStore();
   const visibleTools = listVisibleTools(toolStore, null, false, false, undefined, true);
   const resourceStore = new ResourceStore();
@@ -2072,7 +2117,11 @@ export async function buildCatalogServer(): Promise<BuildCatalogServerResult> {
   const server = new Server(
     { name: 'discord-mcp', version: packageJson.version },
     {
-      capabilities: { tools: {}, resources: { subscribe: true } },
+      capabilities: {
+        tools: {},
+        resources: enableResourceSubscriptions ? { subscribe: true } : {},
+        extensions: { 'io.modelcontextprotocol/ui': {} },
+      },
       cacheHints: { 'tools/list': { ttlMs: 3_600_000, cacheScope: 'private' } },
       instructions:
         'Catalog-only mode: this server advertises the complete Discord MCP tool surface. ' +
@@ -2080,7 +2129,9 @@ export async function buildCatalogServer(): Promise<BuildCatalogServerResult> {
     },
   );
 
-  server.setRequestHandler('tools/list', async () => ({ tools: visibleTools }));
+  server.setRequestHandler('tools/list', async () => ({
+    tools: visibleTools.map(withBlueprintPreview),
+  }));
   server.setRequestHandler('tools/call', async () => ({
     isError: true,
     content: [{ type: 'text', text: 'Catalog-only mode does not execute tools.' }],
@@ -2089,10 +2140,15 @@ export async function buildCatalogServer(): Promise<BuildCatalogServerResult> {
 
   server.setRequestHandler('resources/list', async () => {
     const resources = await resourceStore.list();
-    return { resources: resources.map((resource) => ({ ...resource })) };
+    return {
+      resources: [...resources.map((resource) => ({ ...resource })), blueprintPreviewListing],
+    };
   });
 
   server.setRequestHandler('resources/read', async (req) => {
+    if (req.params.uri === BLUEPRINT_PREVIEW_RESOURCE_URI) {
+      return { contents: [createBlueprintPreviewResource()] };
+    }
     const content = await resourceStore.read(req.params.uri);
     if (content === null) throw new Error(`Resource not found: ${req.params.uri}`);
     return {
@@ -2100,18 +2156,22 @@ export async function buildCatalogServer(): Promise<BuildCatalogServerResult> {
     };
   });
 
-  server.setRequestHandler('resources/subscribe', async (req) => {
-    subscriptions.subscribe(req.params.uri);
-    return {};
-  });
+  if (enableResourceSubscriptions) {
+    server.setRequestHandler('resources/subscribe', async (req) => {
+      subscriptions.subscribe(req.params.uri);
+      return {};
+    });
 
-  server.setRequestHandler('resources/unsubscribe', async (req) => {
-    subscriptions.unsubscribe(req.params.uri);
-    return {};
-  });
+    server.setRequestHandler('resources/unsubscribe', async (req) => {
+      subscriptions.unsubscribe(req.params.uri);
+      return {};
+    });
+  }
 
   const notifyResource = async (uri: string): Promise<void> => {
-    if (subscriptions.has(uri)) await server.sendResourceUpdated({ uri });
+    if (enableResourceSubscriptions && subscriptions.has(uri)) {
+      await server.sendResourceUpdated({ uri });
+    }
   };
 
   return {

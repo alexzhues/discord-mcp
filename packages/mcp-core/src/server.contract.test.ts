@@ -542,9 +542,9 @@ describe('MCP protocol contract', () => {
     });
   });
 
-  it('lists 6 V2 resources via MCP resources/list', async () => {
+  it('lists 6 V2 resources and the blueprint App via MCP resources/list', async () => {
     const { resources } = await client.listResources();
-    expect(resources.length).toBe(6);
+    expect(resources.length).toBe(7);
     expect(resources.map((r) => r.uri)).toContain('discord://components-v2/templates/announcement');
     expect(resources.map((r) => r.uri)).toContain('discord://components-v2/schema');
   });

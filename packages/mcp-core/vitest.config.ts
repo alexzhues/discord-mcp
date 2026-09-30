@@ -1,6 +1,8 @@
 import { defineConfig } from 'vitest/config';
+import { createBlueprintPreviewVirtualPlugin } from './src/apps/build-preview.mjs';
 
 export default defineConfig({
+  plugins: [createBlueprintPreviewVirtualPlugin()],
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
@@ -26,6 +28,8 @@ export default defineConfig({
         'src/container.ts',
         'src/capabilities/types.ts',
         'src/audit/schema.ts',
+        // Browser App entry is exercised by the Playwright mock-host check.
+        'src/apps/blueprint-preview-view.ts',
       ],
       // Keep the long-standing core gate separate from the new, independently
       // exercised blueprint operation graph. A global threshold would include

@@ -1,6 +1,8 @@
 import { defineConfig } from 'tsdown';
+import { createBlueprintPreviewVirtualPlugin } from './src/apps/build-preview.mjs';
 
 export default defineConfig({
+  plugins: [createBlueprintPreviewVirtualPlugin()],
   entry: ['src/index.ts'],
   format: 'esm',
   target: 'node20',
