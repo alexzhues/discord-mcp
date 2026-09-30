@@ -74,12 +74,37 @@ const routes: RouteAudit[] = [
   {
     name: 'homepage',
     path: '/',
-    expectedText: ['Connect your AI to Discord', 'Get a verified result', '209 tools'],
+    expectedText: ['Discord MCP Server', 'Get a verified result', '209 tools'],
+    verify: async (page) => {
+      await requireCount(
+        page.getByRole('heading', { level: 1, name: 'Discord MCP Server', exact: true }),
+        1,
+        'homepage product identity',
+      );
+      if (!(await page.title()).includes('Discord MCP Server')) {
+        throw new Error('Homepage search title must identify the Discord MCP server');
+      }
+      const description = page.locator('meta[name="description"]');
+      await requireCount(description, 1, 'homepage search description');
+      if (!(await description.getAttribute('content'))?.includes('Discord MCP server by cappyeo')) {
+        throw new Error('Homepage search description must identify the project and publisher');
+      }
+      const canonical = page.locator('link[rel="canonical"]');
+      await requireCount(canonical, 1, 'homepage canonical URL');
+      if ((await canonical.getAttribute('href')) !== 'https://cappyeo.github.io/discord-mcp/') {
+        throw new Error('Homepage canonical must point to the public project URL');
+      }
+      await requireCount(
+        page.locator('meta[name="google-site-verification"]'),
+        1,
+        'Google verification',
+      );
+    },
   },
   {
     name: 'first verified outcome journey',
     path: '/',
-    expectedText: ['Connect your AI to Discord', 'Get a verified result', 'Activity Evidence'],
+    expectedText: ['Discord MCP Server', 'Get a verified result', 'Activity Evidence'],
     verify: async (page) => {
       const getVerified = page.getByRole('link', { name: 'Get a verified result', exact: true });
       await requireCount(getVerified, 1, 'primary verified-outcome entry');
@@ -104,7 +129,7 @@ const routes: RouteAudit[] = [
   {
     name: 'site search journey',
     path: '/',
-    expectedText: ['Connect your AI to Discord', 'Start from your goal'],
+    expectedText: ['Discord MCP Server', 'Start from your goal'],
     verify: async (page, viewport) => {
       const journey =
         viewport.width < 800

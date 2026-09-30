@@ -11,7 +11,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'discord-mcp',
-      description: 'Production-grade Discord MCP server for AI agents',
+      description: 'Open-source Discord MCP server by cappyeo for AI clients and caller-owned bots',
       head: siteHead,
       disable404Route: true,
       favicon:

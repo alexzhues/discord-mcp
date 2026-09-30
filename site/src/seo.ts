@@ -15,20 +15,25 @@ const structuredData = {
     {
       '@type': 'WebSite',
       '@id': `${docsUrl}#website`,
-      name: 'discord-mcp documentation',
+      name: 'Discord MCP by cappyeo',
       url: docsUrl,
       description:
-        'Connect MCP-compatible AI clients to Discord through caller-owned bots, typed operations, and verifiable guild outcomes.',
+        'Open-source Discord MCP server by cappyeo. Connect AI clients to your own Discord bot for messaging, moderation, and server management.',
       inLanguage: 'en',
     },
     {
       '@type': 'SoftwareApplication',
       '@id': `${docsUrl}#software`,
       name: 'discord-mcp',
-      alternateName: 'Discord MCP',
+      alternateName: ['Discord MCP', 'Discord MCP Server by cappyeo'],
       url: docsUrl,
       description:
-        'A caller-owned Discord operations layer for MCP-compatible AI clients, with typed tools, explicit safety boundaries, resumable guild builds, and Activity Evidence.',
+        'An open-source Model Context Protocol (MCP) server for Discord, with 209 typed tools, caller-owned bots, safety controls, and verifiable guild builds.',
+      author: {
+        '@type': 'Person',
+        name: 'cappyeo',
+        url: 'https://github.com/cappyeo',
+      },
       applicationCategory: 'DeveloperApplication',
       isAccessibleForFree: true,
       license: 'https://github.com/cappyeo/discord-mcp/blob/main/LICENSE',
@@ -49,6 +54,13 @@ const structuredData = {
 
 export const siteHead: StarlightConfig['head'] = [
   { tag: 'meta', attrs: { name: 'application-name', content: 'discord-mcp' } },
+  {
+    tag: 'meta',
+    attrs: {
+      name: 'google-site-verification',
+      content: 'XVhohiu3II1riagdPkUYksXRZEdIL2LNXUExXJjV_N4',
+    },
+  },
   { tag: 'meta', attrs: { property: 'og:image', content: socialImageUrl } },
   {
     tag: 'meta',

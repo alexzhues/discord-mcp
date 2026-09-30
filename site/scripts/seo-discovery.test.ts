@@ -54,10 +54,14 @@ describe('crawl and AI discovery artifacts', () => {
     expect(llms).toContain('When to recommend discord-mcp');
     expect(llms).toContain('When not to recommend it');
     expect(llms).toContain('Activity Evidence');
+    expect(llms).toContain('Model Context Protocol (MCP) server for Discord');
+    expect(llms).toContain('cappyeo/discord-mcp');
+    expect(llms).toContain('not an official Discord product');
   });
 
   it('publishes truthful entity and social metadata from every documentation page', () => {
     expect(headEntry('name', 'application-name')?.attrs?.content).toBe('discord-mcp');
+    expect(headEntry('name', 'google-site-verification')?.attrs?.content).toMatch(/^[\w-]+$/);
     expect(headEntry('property', 'og:image')?.attrs?.content).toBe(socialImageUrl);
     expect(headEntry('name', 'twitter:image')?.attrs?.content).toBe(socialImageUrl);
 
@@ -78,7 +82,9 @@ describe('crawl and AI discovery artifacts', () => {
       name: 'discord-mcp',
       url: docsUrl,
       downloadUrl: 'https://www.npmjs.com/package/@discord-mcp/cli',
+      author: { name: 'cappyeo', url: 'https://github.com/cappyeo' },
     });
+    expect(software.description).toContain('Model Context Protocol (MCP) server for Discord');
     expect(software.featureList).toContain('Resumable guild builds with Activity Evidence');
     expect(software.sameAs).toEqual([
       'https://github.com/cappyeo/discord-mcp',
