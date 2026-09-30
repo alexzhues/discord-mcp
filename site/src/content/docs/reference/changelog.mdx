@@ -13,6 +13,26 @@ commit history and downloadable artifacts, see
 
 - No unreleased changes.
 
+## v0.30.0 - MCP protocol modernization and blueprint preview
+
+Released 2026-10-01.
+
+- Updated the MCP client and server integrations to SDK 2.2 and added modern
+  stdio negotiation with fresh per-era server instances, including legacy
+  initialize fallback and clean EOF shutdown. The credential-free catalog and
+  local stdio entrypoints now support MCP protocol revision 2026-07-28
+  alongside the existing legacy protocol.
+- Modern stdio and stateless HTTP advertise resource subscriptions as
+  unavailable; legacy stdio and the injected transport retain the existing
+  subscription behavior for Gateway-backed updates.
+- Added a self-contained MCP Apps blueprint preview resource and tool UI
+  metadata. The preview reports the returned plan ID and Activity Evidence,
+  supports a review request in the host conversation for that exact plan ID,
+  and leaves apply approval unchanged.
+- Expanded packaged acceptance checks for modern discovery, structured tool
+  results, catalog isolation, UI resource MIME/content, and protocol-era
+  capability boundaries.
+
 ## v0.29.0 - More MCP clients
 
 Released 2026-09-30.

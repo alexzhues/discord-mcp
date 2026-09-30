@@ -311,7 +311,7 @@ try {
   assert.deepEqual(catalogCheck.data, {
     schema_version: 'discord-mcp.catalog-check.v1',
     tool_count: 209,
-    resource_count: 6,
+    resource_count: 7,
     execution_guard: 'CATALOG_ONLY',
     credentials_required: false,
     discord_execution: 'disabled',
@@ -369,13 +369,17 @@ try {
 
   try {
     await catalogClient.connect(catalogTransport);
+    assert.equal(catalogClient.getServerCapabilities()?.resources?.subscribe, true);
     const { tools } = await catalogClient.listTools();
     assert.equal(tools.length, 209);
     for (const request of [
       { name: 'guild_get', arguments: { guild_id: '111122223333444455' } },
       {
         name: 'messages_send',
-        arguments: { channel_id: '111122223333444455', content: 'must never execute' },
+        arguments: {
+          channel_id: '111122223333444455',
+          content: 'must never execute',
+        },
       },
       { name: 'unknown_catalog_tool', arguments: {} },
     ]) {
@@ -387,6 +391,126 @@ try {
     }
   } finally {
     await closeStdioClientCleanly(catalogClient, catalogTransport, 'catalog');
+  }
+
+  // Exercise the SDK's real discover -> legacy initialize fallback against
+  // the packaged CLI entrypoint, rather than only testing each era separately.
+  const fallbackTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: [cliEntry, 'catalog'],
+    cwd: installRoot,
+    env: commonEnvironment,
+    stderr: 'pipe',
+  });
+  const fallbackMessages = [];
+  let resolveFallbackMessage;
+  fallbackTransport.onmessage = (message) => {
+    fallbackMessages.push(message);
+    resolveFallbackMessage?.();
+  };
+  const nextFallbackMessage = async (timeoutMs = 30_000) => {
+    if (fallbackMessages.length > 0) return fallbackMessages.shift();
+    return new Promise((resolveMessage, rejectMessage) => {
+      let timeoutHandle;
+      const resolveNext = () => {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        resolveFallbackMessage = undefined;
+        resolveMessage(fallbackMessages.shift());
+      };
+      resolveFallbackMessage = resolveNext;
+      timeoutHandle = setTimeout(() => {
+        if (resolveFallbackMessage === resolveNext) resolveFallbackMessage = undefined;
+        rejectMessage(
+          new Error(`packaged discover fallback produced no response within ${timeoutMs} ms`),
+        );
+      }, timeoutMs);
+      timeoutHandle.unref?.();
+    });
+  };
+  await fallbackTransport.start();
+  try {
+    await fallbackTransport.send({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'server/discover',
+      params: {
+        _meta: {
+          'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+          'io.modelcontextprotocol/clientCapabilities': {},
+          'io.modelcontextprotocol/clientInfo': {
+            name: 'packaged-fallback',
+            version: '0.0.0',
+          },
+        },
+      },
+    });
+    const discovered = await nextFallbackMessage();
+    assert.equal(
+      discovered.result?._meta?.['io.modelcontextprotocol/serverInfo']?.name,
+      'discord-mcp',
+    );
+    assert.equal(discovered.result?.capabilities?.resources?.subscribe, undefined);
+    await fallbackTransport.send({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-11-25',
+        capabilities: {},
+        clientInfo: { name: 'packaged-legacy-fallback', version: '0.0.0' },
+      },
+    });
+    const initialized = await nextFallbackMessage();
+    assert.equal(initialized.result?.capabilities?.resources?.subscribe, true);
+  } finally {
+    await closeStdioClientCleanly(
+      { close: () => fallbackTransport.close() },
+      fallbackTransport,
+      'discover fallback',
+    );
+  }
+
+  const modernCatalogTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: [cliEntry, 'catalog'],
+    cwd: installRoot,
+    env: commonEnvironment,
+    stderr: 'pipe',
+  });
+  const modernCatalogClient = new Client(
+    { name: 'discord-mcp-package-modern-catalog-acceptance', version: '0.0.0' },
+    { versionNegotiation: { mode: 'auto' } },
+  );
+
+  try {
+    await modernCatalogClient.connect(modernCatalogTransport);
+    assert.equal(modernCatalogClient.getProtocolEra(), 'modern');
+    assert.equal(modernCatalogClient.getNegotiatedProtocolVersion(), '2026-07-28');
+    assert.equal(modernCatalogClient.getServerCapabilities()?.resources?.subscribe, undefined);
+    const { tools: modernCatalogTools } = await modernCatalogClient.listTools();
+    assert.equal(modernCatalogTools.length, 209);
+    const modernResources = await modernCatalogClient.listResources();
+    assert.equal(modernResources.resources.length, 7);
+    const previewUri = 'ui://discord-mcp/blueprint-preview.html';
+    const previewListing = modernResources.resources.find(
+      (resource) => resource.uri === previewUri,
+    );
+    assert.ok(previewListing, 'modern catalog must list the blueprint preview UI resource');
+    assert.equal(previewListing.mimeType, 'text/html;profile=mcp-app');
+    const preview = await modernCatalogClient.readResource({ uri: previewUri });
+    assert.equal(preview.contents[0]?.mimeType, 'text/html;profile=mcp-app');
+    const previewHtml = preview.contents[0]?.text ?? '';
+    assert.match(previewHtml, /^<!doctype html>/i);
+    assert.doesNotMatch(previewHtml, /<script[^>]+src=/i);
+    for (const marker of [
+      'ui/initialize',
+      'ui/notifications/initialized',
+      'ui/notifications/tool-result',
+    ]) {
+      assert.match(previewHtml, new RegExp(marker.replaceAll('/', '\\/')));
+    }
+  } finally {
+    await closeStdioClientCleanly(modernCatalogClient, modernCatalogTransport, 'modern catalog');
   }
 
   const transport = new StdioClientTransport({
@@ -403,6 +527,7 @@ try {
 
   try {
     await client.connect(transport);
+    assert.equal(client.getServerCapabilities()?.resources?.subscribe, true);
     const { tools } = await client.listTools();
     const advertised = tools.map((tool) => tool.name);
     assert.deepEqual(advertised, [
@@ -438,7 +563,10 @@ try {
 
     const naturalArchitect = await client.callTool({
       name: 'mcp_tools_search',
-      arguments: { query: 'dựng cho tôi một server gaming chuyên nghiệp', limit: 1 },
+      arguments: {
+        query: 'dựng cho tôi một server gaming chuyên nghiệp',
+        limit: 1,
+      },
     });
     assert.equal(naturalArchitect.isError, false);
     assert.equal(naturalArchitect.structuredContent?.matches?.length, 1);
@@ -456,6 +584,48 @@ try {
     assert.ok(browse.structuredContent?.matches?.length > 1);
   } finally {
     await closeStdioClientCleanly(client, transport, 'serve');
+  }
+
+  const modernTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: [cliEntry, 'serve'],
+    cwd: installRoot,
+    env: serverEnvironment,
+    stderr: 'pipe',
+  });
+  const modernClient = new Client(
+    { name: 'discord-mcp-package-modern-acceptance', version: '0.0.0' },
+    { versionNegotiation: { mode: 'auto' } },
+  );
+
+  try {
+    await modernClient.connect(modernTransport);
+    assert.equal(modernClient.getProtocolEra(), 'modern');
+    assert.equal(modernClient.getNegotiatedProtocolVersion(), '2026-07-28');
+    assert.equal(modernClient.getServerCapabilities()?.resources?.subscribe, undefined);
+    const { tools: modernTools } = await modernClient.listTools();
+    assert.deepEqual(
+      modernTools.map((tool) => tool.name),
+      [
+        'build_discord_server',
+        'guild_blueprint_apply',
+        'guild_blueprint_evidence',
+        'mcp_tools_search',
+        'mcp_tools_read',
+        'mcp_tools_write',
+        'mcp_tools_destructive',
+      ],
+    );
+    assert.deepEqual(
+      modernTools.find((tool) => tool.name === 'build_discord_server')?._meta?.ui?.resourceUri,
+      'ui://discord-mcp/blueprint-preview.html',
+    );
+    assert.deepEqual(
+      modernTools.find((tool) => tool.name === 'guild_blueprint_evidence')?._meta?.ui?.resourceUri,
+      'ui://discord-mcp/blueprint-preview.html',
+    );
+  } finally {
+    await closeStdioClientCleanly(modernClient, modernTransport, 'modern serve');
   }
 
   const otelPort = await reserveLoopbackPort();
@@ -564,7 +734,12 @@ try {
     try {
       const overloaded = await postChunked(
         httpEndpoint,
-        JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'tools/list',
+          params: {},
+        }),
         { Accept: 'application/json, text/event-stream' },
       );
       assert.equal(overloaded.status, 503);
@@ -604,7 +779,10 @@ try {
         const startedAt = performance.now();
         const discovery = await httpClient.callTool({
           name: 'mcp_tools_search',
-          arguments: { query: index % 2 === 0 ? 'channels_get' : 'channels', limit: 8 },
+          arguments: {
+            query: index % 2 === 0 ? 'channels_get' : 'channels',
+            limit: 8,
+          },
         });
         discoverySamples.push(performance.now() - startedAt);
         assert.equal(discovery.isError, false);

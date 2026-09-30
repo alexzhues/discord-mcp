@@ -1,6 +1,6 @@
 import { buildCatalogServer } from '@discord-mcp/core';
 import type { Transport } from '@modelcontextprotocol/server';
-import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { type StdioServerHandle, serveStdio } from '@modelcontextprotocol/server/stdio';
 
 /**
  * The catalog server deliberately has no Discord runtime dependencies. Keep
@@ -21,14 +21,40 @@ export interface CatalogStartOptions {
  * OTEL_ENABLED are intentionally irrelevant to this transport.
  */
 export async function startCatalog(opts: CatalogStartOptions = {}): Promise<void> {
-  const { server, auditSink } = await buildCatalogServer();
-  const transport = opts.transport ?? new StdioServerTransport();
-  await server.connect(transport);
+  const initialBuild = await buildCatalogServer();
+  let activeBuild = initialBuild;
+  const catalogBuilds = [initialBuild];
+  const usedBuilds = new Set<typeof initialBuild>();
+  let stdioHandle: StdioServerHandle | undefined;
+  if (opts.transport !== undefined) {
+    usedBuilds.add(initialBuild);
+    await initialBuild.server.connect(opts.transport);
+  } else {
+    stdioHandle = serveStdio(
+      async ({ era }) => {
+        const build = await buildCatalogServer({ enableResourceSubscriptions: era === 'legacy' });
+        catalogBuilds.push(build);
+        activeBuild = build;
+        usedBuilds.add(build);
+        return build.server;
+      },
+      {
+        legacy: 'serve',
+        onerror: (error) =>
+          process.stderr.write(`discord-mcp catalog stdio failed: ${error.message}\n`),
+      },
+    );
+  }
 
   const shutdown = async (signal: string): Promise<void> => {
     try {
-      await server.close();
-      await auditSink.shutdown?.();
+      await (stdioHandle?.close() ?? activeBuild.server.close());
+      await Promise.all(
+        catalogBuilds
+          .filter((build) => !usedBuilds.has(build))
+          .map((build) => build.server.close()),
+      );
+      await initialBuild.auditSink.shutdown?.();
       process.exit(0);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

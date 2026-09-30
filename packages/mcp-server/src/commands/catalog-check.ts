@@ -3,6 +3,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 
 const EXPECTED_TOOL_COUNT = 209;
+const BLUEPRINT_PREVIEW_URI = 'ui://discord-mcp/blueprint-preview.html';
 const EXPECTED_TOOL_NAMES = [
   'guild_blueprint_plan',
   'guild_blueprint_apply',
@@ -16,6 +17,7 @@ const EXPECTED_RESOURCE_URIS = [
   'discord://components-v2/templates/poll_results',
   'discord://components-v2/templates/release_notes',
   'discord://components-v2/templates/welcome_card',
+  BLUEPRINT_PREVIEW_URI,
 ] as const;
 
 export interface CatalogCheckData {
@@ -108,9 +110,10 @@ export async function runCatalogCheck(): Promise<CatalogCheckData> {
     );
     for (const [index, resource] of resourceReads.entries()) {
       const content = resource.contents[0];
+      const isPreview = EXPECTED_RESOURCE_URIS[index] === BLUEPRINT_PREVIEW_URI;
       if (
         resource.contents.length !== 1 ||
-        content?.mimeType !== 'application/json' ||
+        content?.mimeType !== (isPreview ? 'text/html;profile=mcp-app' : 'application/json') ||
         !('text' in content) ||
         typeof content.text !== 'string'
       ) {
@@ -118,7 +121,16 @@ export async function runCatalogCheck(): Promise<CatalogCheckData> {
           `resources/read returned invalid content for ${EXPECTED_RESOURCE_URIS[index]}`,
         );
       }
-      JSON.parse(content.text);
+      if (isPreview) {
+        if (
+          !content.text.startsWith('<!doctype html>') ||
+          !content.text.includes('ui/initialize')
+        ) {
+          throw new Error('resources/read returned an invalid blueprint App');
+        }
+      } else {
+        JSON.parse(content.text);
+      }
     }
 
     const [listedCall, unknownCall] = await Promise.all([

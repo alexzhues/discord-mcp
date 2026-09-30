@@ -38,7 +38,7 @@ describe('buildCatalogServer', () => {
     const uri = 'discord://components-v2/templates/announcement';
     try {
       const listed = await client.listResources();
-      expect(listed.resources).toHaveLength(6);
+      expect(listed.resources).toHaveLength(7);
       expect(listed.resources.map((resource) => resource.uri)).toContain(uri);
       const read = await client.readResource({ uri });
       expect(JSON.parse(read.contents[0]!.text as string).name).toBe('announcement');

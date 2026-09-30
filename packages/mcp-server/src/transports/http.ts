@@ -185,6 +185,8 @@ export async function startHttp(options: StartHttpOptions = {}): Promise<Server>
           logger,
           config,
           transport: 'http',
+          // This stateless transport has no Gateway resource-update publisher.
+          enableResourceSubscriptions: false,
           auditSink,
           payloadApprovalLedger,
           ...(runtimeAccessResolver === undefined ? {} : { runtimeAccessResolver }),

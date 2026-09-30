@@ -47,6 +47,36 @@ contains the compressed blueprint and is authenticated, not encrypted, so keep
 it private. discord-mcp redacts credential-shaped `*_token` arguments from
 audit events and never writes a raw plan token into local state.
 
+## Interactive blueprint review
+
+Clients that support MCP Apps can display an interactive preview for
+`guild_blueprint_plan` (or `build_discord_server` on the progressive surface)
+and `guild_blueprint_evidence`. The preview shows the target, roles, channels,
+planned operations, permission impact, blockers, and verification reported by
+the server. Text-only clients keep the same text and structured tool results.
+
+The view is bundled with discord-mcp and needs no external scripts or network
+access. Its review button sends a request back to the conversation; it does not
+call the apply tool or create confirmation credentials. The existing explicit
+approval, unchanged plan reference, target binding, and final Discord readback
+still govern execution. UI availability depends on the client advertising MCP
+Apps support; successful package tests do not establish support in every host.
+
+Local stdio, the credential-free catalog, and Streamable HTTP accept both
+the MCP `2026-07-28` revision and older clients. Existing connection settings
+remain usable; the client chooses the supported protocol. MCP Apps support is
+a separate client capability, so negotiating the newer protocol alone does
+not enable the interactive view.
+
+Live Gateway resource updates retain the legacy `resources/subscribe` flow.
+Modern stdio does not advertise resource subscriptions yet; its
+`resources/list`, `resources/read`, tool calls, and preview resource remain
+available. Clients that need Gateway updates should use legacy stdio.
+Stateless HTTP does not advertise resource subscriptions either.
+The preview's local mock-host check is available with
+`pnpm --filter site exec tsx scripts/verify-blueprint-preview.ts`; a supported
+MCP Apps host still needs its own live acceptance check.
+
 ## What plan proves
 
 The planner selects one live-verified primary template and zero through three

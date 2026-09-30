@@ -292,6 +292,7 @@ describe('startHttp', () => {
     await client.connect(transport as never);
     try {
       expect(client.getProtocolEra()).toBe('legacy');
+      expect(client.getServerCapabilities()?.resources?.subscribe).not.toBe(true);
       expect(transport.sessionId).toBeUndefined();
       const legacyList = await client.listTools();
       const { tools } = legacyList;
@@ -319,6 +320,7 @@ describe('startHttp', () => {
     try {
       expect(client.getProtocolEra()).toBe('modern');
       expect(client.getNegotiatedProtocolVersion()).toBe('2026-07-28');
+      expect(client.getDiscoverResult()?.capabilities.resources?.subscribe).not.toBe(true);
       expect(transport.sessionId).toBeUndefined();
       fetchSpy.mockClear();
       const firstList = await client.listTools();
