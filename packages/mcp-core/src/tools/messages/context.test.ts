@@ -249,4 +249,122 @@ describe('messages_context', () => {
       ),
     ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
   });
+
+  it('reports the bounded message budget after five full pages', async () => {
+    rest();
+    const page = Array.from({ length: 100 }, (_, index) =>
+      message(`999000999001${String(index).padStart(6, '0')}`, `page message ${index}`),
+    );
+    server.use(
+      http.get(`https://discord.com/api/v10/channels/${CHANNEL}`, () =>
+        HttpResponse.json({ id: CHANNEL, guild_id: GUILD, type: 0 }),
+      ),
+      http.get(`https://discord.com/api/v10/channels/${CHANNEL}/messages`, () =>
+        HttpResponse.json(page),
+      ),
+    );
+    const result = (await tool().run(
+      { channel_id: CHANNEL, limit: 100, pages: 5 },
+      { signal: new AbortController().signal },
+    )) as { structuredContent: any };
+    expect(result.structuredContent.coverage.reasons).toContain('message budget reached (500)');
+  });
+
+  it('marks incomplete message payloads and cross-channel replies unresolved', async () => {
+    rest();
+    const incomplete = {
+      ...message('999000999000000040', 'ignored by projection'),
+      content: undefined,
+      message_reference: {
+        message_id: '999000999000000041',
+        channel_id: DM,
+        guild_id: OTHER_GUILD,
+      },
+    };
+    server.use(
+      http.get(`https://discord.com/api/v10/channels/${CHANNEL}`, () =>
+        HttpResponse.json({ id: CHANNEL, guild_id: GUILD, type: 0 }),
+      ),
+      http.get(`https://discord.com/api/v10/channels/${CHANNEL}/messages`, () =>
+        HttpResponse.json([incomplete]),
+      ),
+    );
+    const result = (await tool().run(
+      { channel_id: CHANNEL },
+      { signal: new AbortController().signal },
+    )) as { structuredContent: any };
+    expect(result.structuredContent.coverage.reasons).toEqual(
+      expect.arrayContaining([
+        'message 999000999000000040 content and rich fields were not returned; payload completeness is unknown',
+        'reply target 999000999000000041 is outside the selected context scope',
+      ]),
+    );
+    expect(result.structuredContent.reply_references[0]).toMatchObject({
+      resolved: false,
+      reason: 'Referenced message is outside the selected channel boundary',
+    });
+  });
+
+  it('resolves same-channel replies with a guild citation', async () => {
+    rest();
+    const source = message('999000999000000042', 'source', {
+      message_reference: { message_id: '999000999000000043', channel_id: CHANNEL, guild_id: GUILD },
+    });
+    server.use(
+      http.get(`https://discord.com/api/v10/channels/${CHANNEL}`, () =>
+        HttpResponse.json({ id: CHANNEL, guild_id: GUILD, type: 0 }),
+      ),
+      http.get(`https://discord.com/api/v10/channels/${CHANNEL}/messages`, () =>
+        HttpResponse.json([source]),
+      ),
+      http.get(`https://discord.com/api/v10/channels/${CHANNEL}/messages/999000999000000043`, () =>
+        HttpResponse.json(message('999000999000000043', 'target')),
+      ),
+    );
+    const result = (await tool().run(
+      { channel_id: CHANNEL },
+      { signal: new AbortController().signal },
+    )) as { structuredContent: any };
+    expect(result.structuredContent.reply_references[0]).toMatchObject({
+      resolved: true,
+      content: 'target',
+      citation: `https://discord.com/channels/${GUILD}/${CHANNEL}/999000999000000043`,
+    });
+  });
+
+  it('stops resolving replies at the bounded reply budget', async () => {
+    rest();
+    const messages = Array.from({ length: 9 }, (_, index) =>
+      message(`99900099900000005${index}`, `source ${index}`, {
+        message_reference: {
+          message_id: `99900099900000006${index}`,
+          channel_id: CHANNEL,
+          guild_id: GUILD,
+        },
+      }),
+    );
+    server.use(
+      http.get(`https://discord.com/api/v10/channels/${CHANNEL}`, () =>
+        HttpResponse.json({ id: CHANNEL, guild_id: GUILD, type: 0 }),
+      ),
+      http.get(`https://discord.com/api/v10/channels/${CHANNEL}/messages`, () =>
+        HttpResponse.json(messages),
+      ),
+      http.get(
+        /https:\/\/discord\.com\/api\/v10\/channels\/111122223333444401\/messages\/99900099900000006\d/,
+        ({ request }) =>
+          HttpResponse.json(message(new URL(request.url).pathname.split('/').at(-1)!, 'target')),
+      ),
+    );
+    const result = (await tool().run(
+      { channel_id: CHANNEL, limit: 20 },
+      { signal: new AbortController().signal },
+    )) as { structuredContent: any };
+    expect(result.structuredContent.reply_references).toHaveLength(9);
+    expect(result.structuredContent.reply_references.at(-1)).toMatchObject({
+      resolved: false,
+      reason: 'reply fetch budget reached',
+    });
+    expect(result.structuredContent.coverage.reasons).toContain('reply fetch budget reached (8)');
+  });
 });

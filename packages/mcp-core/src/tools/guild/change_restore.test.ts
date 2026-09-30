@@ -501,3 +501,128 @@ it('requires reconciling an in-flight inverse before selecting another operation
     inflight: 0,
   });
 });
+
+it('returns partial when one selected inverse succeeds and another is invalid', async () => {
+  const before = {
+    guild: { id: guild },
+    bot_roles: [targetRole],
+    roles: [
+      { id: guild, position: 0, permissions: '0' },
+      { id: targetRole, position: 10, permissions: '268435476' },
+    ],
+    channels: [{ id: channel, name: 'old' }],
+  };
+  const { p, ref } = await plan({ channels: [{ id: channel, patch: { name: 'new' } }] }, before);
+  const live = [{ id: channel, name: 'new' }];
+  handlers({ roles: before.roles, channels: live });
+  server.use(
+    http.patch(`*/channels/${channel}`, async () => {
+      live[0]!.name = 'old';
+      return HttpResponse.json({});
+    }),
+  );
+  await saveGuildChangeCheckpoint(
+    ref,
+    { mode: 'apply', completed: [0], inflight: null },
+    container.config,
+  );
+  const result = (await tool().run(
+    {
+      guild_id: guild,
+      expected_bot_id: bot,
+      plan_ref: ref,
+      approval_id: p.approval_id,
+      operation_indexes: [0, 7],
+    },
+    { signal: new AbortController().signal },
+  )) as { structuredContent: { status: string; restored: number[]; blocked: string[] } };
+  expect(result.structuredContent.status).toBe('partial');
+  expect(result.structuredContent.restored).toEqual([0]);
+  expect(result.structuredContent.blocked).toContain('OPERATION_7_NOT_FOUND');
+});
+
+it('keeps the inverse checkpoint inflight on readback mismatch', async () => {
+  const before = {
+    guild: { id: guild },
+    bot_roles: [targetRole],
+    roles: [
+      { id: guild, position: 0, permissions: '0' },
+      { id: targetRole, position: 10, permissions: '268435476' },
+    ],
+    channels: [{ id: channel, name: 'old' }],
+  };
+  const { p, ref } = await plan({ channels: [{ id: channel, patch: { name: 'new' } }] }, before);
+  handlers({ roles: before.roles, channels: [{ id: channel, name: 'new' }] });
+  await saveGuildChangeCheckpoint(
+    ref,
+    { mode: 'apply', completed: [0], inflight: null },
+    container.config,
+  );
+  const result = (await tool().run(
+    {
+      guild_id: guild,
+      expected_bot_id: bot,
+      plan_ref: ref,
+      approval_id: p.approval_id,
+      operation_indexes: [0],
+    },
+    { signal: new AbortController().signal },
+  )) as { structuredContent: { status: string; blocked: string[] } };
+  expect(result.structuredContent.status).toBe('blocked');
+  expect(result.structuredContent.blocked).toContain('OPERATION_0_READBACK_MISMATCH');
+  expect((await loadGuildChangeCheckpoint(ref, container.config)).inflight).toBe(0);
+});
+
+it('observes cancellation after the first inverse before starting the next', async () => {
+  const before = {
+    guild: { id: guild },
+    bot_roles: [targetRole],
+    roles: [
+      { id: guild, position: 0, permissions: '0' },
+      { id: targetRole, position: 10, permissions: '268435476' },
+    ],
+    channels: [
+      { id: channel, name: 'old' },
+      { id: '333333333333333334', name: 'old2' },
+    ],
+  };
+  const { p, ref } = await plan(
+    {
+      channels: [
+        { id: channel, patch: { name: 'new' } },
+        { id: '333333333333333334', patch: { name: 'new2' } },
+      ],
+    },
+    before,
+  );
+  const controller = new AbortController();
+  const live = [
+    { id: channel, name: 'new' },
+    { id: '333333333333333334', name: 'new2' },
+  ];
+  handlers({ roles: before.roles, channels: live });
+  server.use(
+    http.patch(`*/channels/${channel}`, async () => {
+      controller.abort();
+      live[0]!.name = 'old';
+      return HttpResponse.json({});
+    }),
+  );
+  await saveGuildChangeCheckpoint(
+    ref,
+    { mode: 'apply', completed: [0, 1], inflight: null },
+    container.config,
+  );
+  const result = (await tool().run(
+    {
+      guild_id: guild,
+      expected_bot_id: bot,
+      plan_ref: ref,
+      approval_id: p.approval_id,
+      operation_indexes: [0, 1],
+    },
+    { signal: controller.signal },
+  )) as { structuredContent: { status: string; blocked: string[] } };
+  expect(result.structuredContent.status).toBe('partial');
+  expect(result.structuredContent.blocked).toContain('CANCELLED');
+});

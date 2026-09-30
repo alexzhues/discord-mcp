@@ -280,8 +280,9 @@ export class WorkflowEngine {
         inFlight.definition.retry_safe
       ) {
         const reset: WorkflowStepCheckpoint = { definition: inFlight.definition, state: 'pending' };
+        const { failure: _failure, ...withoutFailure } = record;
         record = {
-          ...record,
+          ...withoutFailure,
           steps: record.steps.map((step, index) => (index === record.current_step ? reset : step)),
           status: 'queued',
           updated_at: now(),
@@ -474,7 +475,8 @@ export class WorkflowEngine {
               'CATEGORY_DISABLED',
               'GUILD_NOT_ALLOWED',
             ]);
-            const uncertain = !noEffect.has(code) && !step.definition.idempotent;
+            const uncertain =
+              !noEffect.has(code) && (!step.definition.idempotent || !step.definition.retry_safe);
             const failed: WorkflowRecord = {
               ...record,
               status: uncertain ? 'needs_review' : 'failed',
@@ -510,9 +512,15 @@ export class WorkflowEngine {
             ?.status;
           if (
             typeof resultStatus === 'string' &&
-            new Set(['blocked', 'partial', 'busy', 'stale', 'drifted', 'needs_review']).has(
-              resultStatus,
-            )
+            new Set([
+              'blocked',
+              'partial',
+              'busy',
+              'stale',
+              'drifted',
+              'needs_review',
+              'unverified',
+            ]).has(resultStatus)
           ) {
             const incomplete = {
               code: 'WORKFLOW_STEP_INCOMPLETE',

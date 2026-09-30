@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { createHmac } from 'node:crypto';
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -124,6 +125,123 @@ describe('WorkflowStore', () => {
     const dir = await mkdtemp(join(tmpdir(), 'discord-mcp-workflow-key-'));
     try {
       expect(() => new WorkflowStore(dir, 'too-short')).toThrow(/at least 32/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps concurrent readers on complete authenticated snapshots during writes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'discord-mcp-workflow-read-write-'));
+    try {
+      const store = new WorkflowStore(dir, 'workflow-test-integrity-key-01234567890123456789');
+      await store.init();
+      await store.put(record);
+      const writes = Promise.all(
+        Array.from({ length: 5 }, (_, index) =>
+          store.put({
+            ...record,
+            updated_at: `2026-01-01T00:00:${String(index).padStart(2, '0')}.000Z`,
+          }),
+        ),
+      );
+      const reads = Promise.all(
+        Array.from({ length: 10 }, async () => {
+          const value = await store.get(record.id);
+          expect(value?.id).toBe(record.id);
+        }),
+      );
+      await Promise.all([writes, reads]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('serializes same-id access across store instances and preserves authenticated snapshots', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'discord-mcp-workflow-cross-store-'));
+    const key = 'workflow-test-integrity-key-01234567890123456789';
+    try {
+      const writer = new WorkflowStore(dir, key);
+      const readerA = new WorkflowStore(dir, key);
+      const readerB = new WorkflowStore(dir, key);
+      await Promise.all([writer.init(), readerA.init(), readerB.init()]);
+      await writer.put(record);
+      const observed: string[] = [];
+      const reads = [readerA, readerB].map(async (store) => {
+        for (let round = 0; round < 50; round += 1) {
+          const snapshot = await store.get(record.id);
+          expect(snapshot?.id).toBe(record.id);
+          observed.push(snapshot?.updated_at ?? '');
+        }
+      });
+      const writes = (async () => {
+        for (let index = 1; index <= 20; index += 1) {
+          await writer.put({
+            ...record,
+            updated_at: `2026-01-01T00:00:${String(index).padStart(2, '0')}.000Z`,
+          });
+        }
+      })();
+      await Promise.all([...reads, writes]);
+      expect(observed).toHaveLength(100);
+      const final = await readerA.get(record.id);
+      expect(final?.updated_at).toBe('2026-01-01T00:00:20.000Z');
+      const envelope = JSON.parse(await readFile(join(dir, `${record.id}.json`), 'utf8')) as {
+        record: WorkflowRecord;
+        mac: string;
+      };
+      const expectedMac = createHmac('sha256', key)
+        .update(JSON.stringify(envelope.record))
+        .digest('hex');
+      expect(envelope.mac).toBe(expectedMac);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers after a queued read rejects a tampered snapshot', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'discord-mcp-workflow-read-recovery-'));
+    const key = 'workflow-test-integrity-key-01234567890123456789';
+    try {
+      const first = new WorkflowStore(dir, key);
+      const second = new WorkflowStore(dir, key);
+      await Promise.all([first.init(), second.init()]);
+      await first.put(record);
+      const path = join(dir, `${record.id}.json`);
+      const envelope = JSON.parse(await readFile(path, 'utf8')) as {
+        record: WorkflowRecord;
+        mac: string;
+      };
+      envelope.record = { ...envelope.record, status: 'completed' };
+      await writeFile(path, JSON.stringify(envelope));
+      await expect(second.get(record.id)).rejects.toThrow(/integrity/);
+      await first.put({ ...record, updated_at: '2026-01-01T00:00:20.000Z' });
+      await expect(second.get(record.id)).resolves.toMatchObject({
+        status: 'queued',
+        updated_at: '2026-01-01T00:00:20.000Z',
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('cleans a failed atomic write and keeps the same-id queue usable', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'discord-mcp-workflow-write-recovery-'));
+    const key = 'workflow-test-integrity-key-01234567890123456789';
+    try {
+      const store = new WorkflowStore(dir, key);
+      await store.init();
+      await writeFile(join(dir, `${record.id}.json`), 'directory marker');
+      await rm(join(dir, `${record.id}.json`));
+      const { mkdir } = await import('node:fs/promises');
+      await mkdir(join(dir, `${record.id}.json`));
+      await expect(store.put(record)).rejects.toThrow();
+      expect((await readdir(dir)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+      await rm(join(dir, `${record.id}.json`), { recursive: true, force: true });
+      await store.put({ ...record, updated_at: '2026-01-01T00:00:20.000Z' });
+      await expect(store.get(record.id)).resolves.toMatchObject({
+        id: record.id,
+        updated_at: '2026-01-01T00:00:20.000Z',
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

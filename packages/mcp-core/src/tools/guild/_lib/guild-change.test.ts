@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { server } from '@discord-mcp/server-mocks';
@@ -13,12 +13,53 @@ import {
   createGuildChangePlan,
   GuildChangeRequestSchema,
   loadGuildChangeCheckpoint,
+  loadGuildChangePlan,
   saveGuildChangeCheckpoint,
   saveGuildChangePlan,
   snapshotDigest,
 } from './guild-change.js';
 
 describe('guild change plan contracts', () => {
+  it('rejects tampered plan/checkpoint proofs and malformed references', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'guild-change-proof-'));
+    const config = loadConfig({
+      DISCORD_TOKEN: 'fake'.padEnd(64, 'x'),
+      MCP_BLUEPRINT_STATE_DIR: directory,
+    });
+    try {
+      const plan = createGuildChangePlan(
+        {
+          schema_version: 'guild_change_plan.v1',
+          guild_id: '111111111111111111',
+          bot_id: '222222222222222222',
+          request: 'review',
+          changes: GuildChangeRequestSchema.parse({
+            channels: [{ id: '333333333333333333', patch: { name: 'new' } }],
+          }),
+          before: { guild: { id: '111111111111111111' }, bot_roles: [], roles: [], channels: [] },
+        },
+        'unused',
+      );
+      const ref = await saveGuildChangePlan(plan, config);
+      expect((await loadGuildChangePlan(ref, config)).approval_id).toBe(plan.approval_id);
+      await expect(loadGuildChangePlan('../outside', config)).rejects.toThrow(
+        'Invalid guild change plan reference',
+      );
+      const path = join(directory, `${ref.slice(5)}.json`);
+      const envelope = JSON.parse(await readFile(path, 'utf8'));
+      envelope.plan.guild_id = '444444444444444444';
+      await writeFile(path, JSON.stringify(envelope));
+      await expect(loadGuildChangePlan(ref, config)).rejects.toThrow('proof is invalid');
+      await saveGuildChangeCheckpoint(ref, { completed: [0], inflight: null }, config);
+      const checkpointPath = join(directory, `${ref.slice(5)}.checkpoint.json`);
+      const checkpoint = JSON.parse(await readFile(checkpointPath, 'utf8'));
+      checkpoint.auth_tag = '0';
+      await writeFile(checkpointPath, JSON.stringify(checkpoint));
+      await expect(loadGuildChangeCheckpoint(ref, config)).rejects.toThrow('proof is invalid');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
   it('preserves omitted fields by keeping the typed change surface sparse', () => {
     const changes = GuildChangeRequestSchema.parse({
       channels: [{ id: '111111111111111111', patch: { name: 'chat' } }],

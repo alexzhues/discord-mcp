@@ -30,6 +30,51 @@ function run(args: Record<string, unknown>) {
 }
 
 describe('permissions_member_access_report', () => {
+  it.each([
+    'missing everyone',
+    'truncated channels',
+    'missing selected channel',
+  ] as const)('marks %s incomplete', async (scenario) => {
+    const channels = Array.from(
+      { length: scenario === 'truncated channels' ? 101 : 1 },
+      (_, index) => ({
+        id: String(170000000000000000n + BigInt(index)),
+        name: `channel-${index}`,
+        type: 0,
+        permission_overwrites: [],
+      }),
+    );
+    server.use(
+      http.get(`${API}/guilds/${GUILD}`, () => HttpResponse.json({ id: GUILD, owner_id: '1' })),
+      http.get(`${API}/guilds/${GUILD}/members/${USER}`, () => HttpResponse.json({ roles: [] })),
+      http.get(`${API}/guilds/${GUILD}/roles`, () =>
+        HttpResponse.json(
+          scenario === 'missing everyone' ? [] : [{ id: GUILD, position: 0, permissions: '0' }],
+        ),
+      ),
+      http.get(`${API}/guilds/${GUILD}/channels`, () => HttpResponse.json(channels)),
+    );
+    const result = await run({
+      guild_id: GUILD,
+      user_id: USER,
+      ...(scenario === 'missing selected channel' ? { channel_ids: [CHANNEL] } : {}),
+    });
+    expect(result.structuredContent.complete).toBe(false);
+    expect(result.structuredContent.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(
+          scenario === 'missing everyone'
+            ? /MISSING_EVERYONE_ROLE/
+            : scenario === 'truncated channels'
+              ? /truncated to 100/
+              : /not returned/,
+        ),
+      ]),
+    );
+    expect(result.structuredContent.channels).toHaveLength(
+      scenario === 'truncated channels' ? 100 : 0,
+    );
+  });
   it('marks missing roles and truncated selection incomplete instead of guessing', async () => {
     server.use(
       http.get(`${API}/guilds/${GUILD}`, () => HttpResponse.json({ id: GUILD, owner_id: '1' })),

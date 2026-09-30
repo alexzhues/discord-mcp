@@ -3,6 +3,24 @@ import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { WORKFLOW_ID_RE, type WorkflowRecord } from './types.js';
 
+const checkpointAccess = new Map<string, Promise<void>>();
+
+/** Keep this process's readers from holding a Windows file open during replacement. */
+async function withCheckpointAccess<T>(path: string, operation: () => Promise<T>): Promise<T> {
+  const previous = checkpointAccess.get(path) ?? Promise.resolve();
+  const result = previous.then(operation);
+  const settled = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  checkpointAccess.set(path, settled);
+  try {
+    return await result;
+  } finally {
+    if (checkpointAccess.get(path) === settled) checkpointAccess.delete(path);
+  }
+}
+
 function assertJobId(id: string): void {
   if (!WORKFLOW_ID_RE.test(id)) throw new Error('Invalid workflow ID.');
 }
@@ -21,9 +39,11 @@ async function atomicRename(source: string, destination: string): Promise<void> 
       return;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      if (!['EPERM', 'EACCES', 'EBUSY', 'ENOTEMPTY'].includes(code ?? '') || attempt >= 5)
+      if (!['EPERM', 'EACCES', 'EBUSY', 'ENOTEMPTY'].includes(code ?? '') || attempt >= 5) {
+        await rm(source, { force: true }).catch(() => undefined);
         throw error;
-      await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1)));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt));
     }
   }
 }
@@ -64,60 +84,72 @@ export class WorkflowStore {
 
   public async requestCancel(id: string): Promise<void> {
     const destination = this.cancelPath(id);
-    const temporary = `${destination}.${randomUUID()}.tmp`;
-    await writeFile(temporary, `${Date.now()}\n`, { mode: 0o600 });
-    await atomicRename(temporary, destination);
+    return withCheckpointAccess(destination, async () => {
+      const temporary = `${destination}.${randomUUID()}.tmp`;
+      await writeFile(temporary, `${Date.now()}\n`, { mode: 0o600 });
+      await atomicRename(temporary, destination);
+    });
   }
 
   public async isCancelRequested(id: string): Promise<boolean> {
-    try {
-      await readFile(this.cancelPath(id));
-      return true;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
-      throw error;
-    }
+    const destination = this.cancelPath(id);
+    return withCheckpointAccess(destination, async () => {
+      try {
+        await readFile(destination);
+        return true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+        throw error;
+      }
+    });
   }
 
   public async clearCancel(id: string): Promise<void> {
-    await rm(this.cancelPath(id), { force: true });
+    const destination = this.cancelPath(id);
+    await withCheckpointAccess(destination, () => rm(destination, { force: true }));
   }
 
   public async get(id: string): Promise<WorkflowRecord | undefined> {
-    try {
-      const envelope = JSON.parse(await readFile(this.path(id), 'utf8')) as {
-        record?: WorkflowRecord;
-        mac?: string;
-      };
-      if (envelope.record === undefined || typeof envelope.mac !== 'string')
-        throw new Error('Workflow checkpoint is malformed.');
-      const expected = createHmac('sha256', this.integrityKey)
-        .update(JSON.stringify(envelope.record))
-        .digest('hex');
-      if (
-        envelope.mac.length !== expected.length ||
-        !timingSafeEqual(Buffer.from(envelope.mac), Buffer.from(expected))
-      )
-        throw new Error('Workflow checkpoint integrity check failed.');
-      return envelope.record;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-      throw error;
-    }
+    const destination = this.path(id);
+    return withCheckpointAccess(destination, async () => {
+      try {
+        const envelope = JSON.parse(await readFile(destination, 'utf8')) as {
+          record?: WorkflowRecord;
+          mac?: string;
+        };
+        if (envelope.record === undefined || typeof envelope.mac !== 'string')
+          throw new Error('Workflow checkpoint is malformed.');
+        const expected = createHmac('sha256', this.integrityKey)
+          .update(JSON.stringify(envelope.record))
+          .digest('hex');
+        if (
+          envelope.mac.length !== expected.length ||
+          !timingSafeEqual(Buffer.from(envelope.mac), Buffer.from(expected))
+        )
+          throw new Error('Workflow checkpoint integrity check failed.');
+        return envelope.record;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+        throw error;
+      }
+    });
   }
 
   public async put(record: WorkflowRecord): Promise<void> {
     const destination = this.path(record.id);
-    const temporary = `${destination}.${randomUUID()}.tmp`;
-    const mac = createHmac('sha256', this.integrityKey)
-      .update(JSON.stringify(record))
-      .digest('hex');
-    await writeFile(temporary, `${JSON.stringify({ record, mac })}\n`, { mode: 0o600 });
-    await atomicRename(temporary, destination);
+    return withCheckpointAccess(destination, async () => {
+      const temporary = `${destination}.${randomUUID()}.tmp`;
+      const mac = createHmac('sha256', this.integrityKey)
+        .update(JSON.stringify(record))
+        .digest('hex');
+      await writeFile(temporary, `${JSON.stringify({ record, mac })}\n`, { mode: 0o600 });
+      await atomicRename(temporary, destination);
+    });
   }
 
   public async remove(id: string): Promise<void> {
-    await rm(this.path(id), { force: true });
+    const destination = this.path(id);
+    await withCheckpointAccess(destination, () => rm(destination, { force: true }));
   }
 
   /** Hold an exclusive per-job lock for one executor attempt. */

@@ -30,6 +30,13 @@ const context = (
   ...(authorizeStep === undefined ? {} : { authorizeStep }),
 });
 
+async function waitForLockRelease(store: WorkflowStore, id: string): Promise<void> {
+  await vi.waitFor(() => store.withLock(id, async () => undefined), {
+    timeout: 5000,
+    interval: 10,
+  });
+}
+
 async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), 'discord-mcp-workflow-'));
   const store = new WorkflowStore(dir, 'workflow-test-integrity-key-01234567890123456789');
@@ -58,6 +65,7 @@ describe('WorkflowEngine', () => {
         { target, steps: [{ tool: 'messages_send', args: {} }] },
         context(invoke),
       );
+
       await vi.waitFor(
         async () => {
           const record = await f.store.get(started.id);
@@ -116,7 +124,11 @@ describe('WorkflowEngine', () => {
       )
         await new Promise((resolve) => setTimeout(resolve, 5));
       release(ok);
-      for (let i = 0; i < 1000 && (await f.store.get(started.id))?.status !== 'completed'; i += 1)
+      for (
+        let i = 0;
+        i < 2000 && ['queued', 'running'].includes((await f.store.get(started.id))?.status ?? '');
+        i += 1
+      )
         await new Promise((resolve) => setTimeout(resolve, 5));
       const inFlight = await f.store.get(started.id);
       if (inFlight === undefined) throw new Error('checkpoint disappeared');
@@ -143,21 +155,34 @@ describe('WorkflowEngine', () => {
 
   it('allows an explicit resume retry only for policy-declared idempotent steps', async () => {
     const f = await fixture();
+    let startedId = '';
     try {
       const first = vi.fn().mockRejectedValueOnce(new Error('transient')).mockResolvedValue(ok);
       const started = await f.engine.start(
         { target, steps: [{ tool: 'channels_read', args: {} }] },
         context(first),
       );
-      for (let i = 0; i < 1000 && (await f.store.get(started.id))?.status !== 'failed'; i += 1)
-        await new Promise((resolve) => setTimeout(resolve, 5));
+      startedId = started.id;
+      await vi.waitFor(
+        async () =>
+          expect((await f.store.get(started.id))?.failure?.code).toBe('WORKFLOW_STEP_THROWN'),
+        { timeout: 5000, interval: 10 },
+      );
+      const failed = await f.store.get(started.id);
+      expect(failed?.status).toBe('failed');
+      expect(failed?.failure?.code).toBe('WORKFLOW_STEP_THROWN');
+      expect(failed?.steps[0]?.state).toBe('in_flight');
+      expect(failed?.steps[0]?.definition.idempotent).toBe(true);
+      expect(failed?.steps[0]?.definition.retry_safe).toBe(true);
       const resumed = await f.engine.resume(started.id, target, context(first));
       expect(['queued', 'running', 'completed']).toContain(resumed.status);
-      expect((await f.store.get(started.id))?.steps[0]?.state).toBe('pending');
-      for (let i = 0; i < 1000 && (await f.store.get(started.id))?.status === 'running'; i += 1)
+      for (let i = 0; i < 1000 && (await f.store.get(started.id))?.status !== 'completed'; i += 1)
         await new Promise((resolve) => setTimeout(resolve, 10));
+      expect((await f.store.get(started.id))?.status).toBe('completed');
+      expect(first).toHaveBeenCalledTimes(2);
     } finally {
-      await rm(f.dir, { recursive: true, force: true });
+      await waitForLockRelease(f.store, startedId);
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
   });
 
@@ -209,6 +234,168 @@ describe('WorkflowEngine', () => {
       await expect(f.engine.resume(started.id, target, wrongContext)).rejects.toThrow(
         /trusted server/,
       );
+    } finally {
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it('rejects invalid definitions and unknown policies before persistence', async () => {
+    const f = await fixture();
+    try {
+      await expect(
+        new WorkflowEngine({
+          store: f.store,
+          resolvePolicy: (tool) =>
+            tool === 'channels_read' ? { idempotent: true, retry_safe: true } : undefined,
+        }).start(
+          { target, steps: [{ id: 'Bad-ID', tool: 'channels_read', args: {} }] },
+          context(async () => ok),
+        ),
+      ).rejects.toThrow(/Invalid workflow step id/);
+      await expect(
+        new WorkflowEngine({
+          store: f.store,
+          resolvePolicy: (tool) =>
+            tool === 'channels_read' ? { idempotent: true, retry_safe: true } : undefined,
+        }).start(
+          { target, steps: [{ tool: 'unknown_tool', args: {} }] },
+          context(async () => ok),
+        ),
+      ).rejects.toThrow(/Unknown workflow tool/);
+      await expect(
+        f.engine.start(
+          {
+            target: { profile_id: target.profile_id },
+            steps: [{ tool: 'channels_read', args: { bot_id: target.bot_id } }],
+          },
+          context(async () => ok, { profile_id: target.profile_id }),
+        ),
+      ).rejects.toThrow(/cannot be verified/);
+    } finally {
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it('records known tool errors and aborts without replaying an uncertain effect', async () => {
+    const f = await fixture();
+    try {
+      const invoke = vi.fn().mockResolvedValue({
+        isError: true,
+        content: [{ type: 'text', text: 'bad input' }],
+        structuredContent: { code: 'VALIDATION_ERROR' },
+      } satisfies CallToolResult);
+      const started = await f.engine.start(
+        { target, steps: [{ tool: 'messages_send', args: {} }] },
+        context(invoke),
+      );
+      await vi.waitFor(async () => expect((await f.store.get(started.id))?.status).toBe('failed'), {
+        timeout: 5000,
+        interval: 10,
+      });
+      expect((await f.store.get(started.id))?.failure?.code).toBe('VALIDATION_ERROR');
+      expect(invoke).toHaveBeenCalledOnce();
+    } finally {
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it('reviews a retriable Discord error when an idempotent write is not retry-safe', async () => {
+    const f = await fixture();
+    try {
+      const invoke = vi.fn().mockResolvedValue({
+        isError: true,
+        content: [{ type: 'text', text: 'discord failure' }],
+        structuredContent: { code: 'DISCORD_API_ERROR', retriable: true },
+      } satisfies CallToolResult);
+      const engine = new WorkflowEngine({
+        store: f.store,
+        resolvePolicy: (tool) =>
+          tool === 'channels_read'
+            ? { idempotent: true, retry_safe: false }
+            : { idempotent: false, retry_safe: false },
+      });
+      const started = await engine.start(
+        { target, steps: [{ tool: 'channels_read', args: {} }] },
+        context(invoke),
+      );
+      await vi.waitFor(
+        async () => expect((await f.store.get(started.id))?.status).toBe('needs_review'),
+        {
+          timeout: 5000,
+          interval: 10,
+        },
+      );
+      const resumed = await engine.resume(started.id, target, context(invoke));
+      expect(resumed.status).toBe('needs_review');
+      expect(invoke).toHaveBeenCalledOnce();
+    } finally {
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it('clears a prior safe read failure before completing its retry', async () => {
+    const f = await fixture();
+    let startedId = '';
+    try {
+      const invoke = vi
+        .fn()
+        .mockResolvedValueOnce({
+          isError: true,
+          content: [{ type: 'text', text: 'temporary' }],
+          structuredContent: { code: 'DISCORD_API_ERROR', retriable: true },
+        } satisfies CallToolResult)
+        .mockResolvedValueOnce(ok);
+      const started = await f.engine.start(
+        { target, steps: [{ tool: 'channels_read', args: {} }] },
+        context(invoke),
+      );
+      startedId = started.id;
+      await vi.waitFor(async () => expect((await f.store.get(started.id))?.status).toBe('failed'), {
+        timeout: 5000,
+        interval: 10,
+      });
+      await waitForLockRelease(f.store, started.id);
+      const resumed = await f.engine.resume(started.id, target, context(invoke));
+      await vi.waitFor(
+        async () => expect((await f.store.get(started.id))?.status).toBe('completed'),
+        {
+          timeout: 5000,
+          interval: 10,
+        },
+      );
+      expect(resumed.status).toBe('queued');
+      expect((await f.store.get(started.id))?.failure).toBeUndefined();
+      expect(invoke).toHaveBeenCalledTimes(2);
+    } finally {
+      await waitForLockRelease(f.store, startedId);
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it('stops after a known scope rejection and does not invoke later steps', async () => {
+    const f = await fixture();
+    try {
+      const invoke = vi.fn().mockResolvedValue({
+        isError: true,
+        content: [{ type: 'text', text: 'scope denied' }],
+        structuredContent: { code: 'SCOPE_REJECTED' },
+      } satisfies CallToolResult);
+      const started = await f.engine.start(
+        {
+          target,
+          steps: [
+            { tool: 'channels_read', args: {} },
+            { tool: 'channels_read', args: {} },
+          ],
+        },
+        context(invoke),
+      );
+      await vi.waitFor(async () => expect((await f.store.get(started.id))?.status).toBe('failed'), {
+        timeout: 5000,
+        interval: 10,
+      });
+      expect((await f.store.get(started.id))?.failure?.code).toBe('SCOPE_REJECTED');
+      expect(invoke).toHaveBeenCalledOnce();
     } finally {
       await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
@@ -338,6 +525,7 @@ describe('WorkflowEngine', () => {
 
   it('never replays an uncertain non-idempotent error on resume', async () => {
     const f = await fixture();
+    let startedId = '';
     try {
       const uncertain: CallToolResult = {
         isError: true,
@@ -349,6 +537,7 @@ describe('WorkflowEngine', () => {
         { target, steps: [{ tool: 'messages_send', args: { content: 'x' } }] },
         context(invoke),
       );
+      startedId = started.id;
       for (let i = 0; i < 300 && (await f.store.get(started.id))?.status !== 'needs_review'; i += 1)
         await new Promise((resolve) => setTimeout(resolve, 10));
       expect((await f.store.get(started.id))?.status).toBe('needs_review');
@@ -356,6 +545,7 @@ describe('WorkflowEngine', () => {
       expect(resumed.status).toBe('needs_review');
       expect(invoke).toHaveBeenCalledOnce();
     } finally {
+      await waitForLockRelease(f.store, startedId);
       await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
   });
@@ -437,29 +627,40 @@ describe('WorkflowEngine', () => {
     }
   });
 
-  it('pauses on an incomplete successful response and does not continue', async () => {
+  it.each([
+    'partial',
+    'unverified',
+  ])('reviews a %s composer delivery without continuing or replaying it', async (status) => {
     const f = await fixture();
+    let startedId = '';
     try {
       const invoke = vi.fn().mockResolvedValue({
         isError: false,
         content: [{ type: 'text', text: 'partial' }],
-        structuredContent: { status: 'partial' },
+        structuredContent: { status, sent_count: 0 },
       } satisfies CallToolResult);
       const started = await f.engine.start(
         {
           target,
           steps: [
-            { tool: 'messages_send', args: {} },
+            { tool: 'messages_publish', args: {} },
             { tool: 'messages_send', args: {} },
           ],
         },
         context(invoke),
       );
+      startedId = started.id;
       for (let i = 0; i < 300 && (await f.store.get(started.id))?.status !== 'needs_review'; i += 1)
         await new Promise((resolve) => setTimeout(resolve, 10));
       expect((await f.store.get(started.id))?.status).toBe('needs_review');
+      await waitForLockRelease(f.store, started.id);
+      expect((await f.engine.resume(started.id, target, context(invoke))).status).toBe(
+        'needs_review',
+      );
+      expect((await f.store.get(started.id))?.steps[1]?.state).toBe('pending');
       expect(invoke).toHaveBeenCalledOnce();
     } finally {
+      await waitForLockRelease(f.store, startedId);
       await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
   });
