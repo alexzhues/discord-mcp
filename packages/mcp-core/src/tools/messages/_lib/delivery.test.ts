@@ -425,6 +425,38 @@ describe('composer delivery and preservation', () => {
     expect(patch).toHaveBeenCalledTimes(1);
   });
 
+  it('reports a retained attachment missing from readback as a mismatch', async () => {
+    stored.set(
+      MESSAGE,
+      message({
+        attachments: [
+          {
+            id: OLD_FILE,
+            filename: 'poster.png',
+            size: 12,
+            url: 'https://cdn.example.test/poster.png',
+          },
+        ],
+      }),
+    );
+    patch.mockImplementation(async (_route, options) => {
+      const result = uploaded(options, stored.get(MESSAGE)!);
+      result.attachments = (result.attachments as Array<Record<string, unknown>>).filter(
+        (file) => file.filename !== 'poster.png',
+      );
+      stored.set(MESSAGE, result);
+      return result;
+    });
+    const result = await updateMessage(
+      { channel_id: CHANNEL, message_id: MESSAGE, files: [newFile] },
+      signal,
+    );
+    expect(result).toMatchObject({
+      status: 'unverified',
+      receipts: [{ verification: 'mismatch', mismatch_fields: ['retained_attachments'] }],
+    });
+  });
+
   it('references an existing attachment during an embed update', async () => {
     stored.set(
       MESSAGE,
@@ -506,6 +538,20 @@ describe('composer delivery and preservation', () => {
     expect(patch).not.toHaveBeenCalled();
   });
 
+  it('rejects an invalid active bot identity response before patching', async () => {
+    stored.set(MESSAGE, message());
+    get.mockImplementation(async (route: string) => {
+      if (route === Routes.user('@me')) return {};
+      return stored.get(route.split('/').at(-1)!);
+    });
+    await expect(
+      updateMessage({ channel_id: CHANNEL, message_id: MESSAGE, content: 'new' }, signal),
+    ).rejects.toMatchObject({
+      issues: [{ message: expect.stringContaining('verifiable active bot identity') }],
+    });
+    expect(patch).not.toHaveBeenCalled();
+  });
+
   it('rejects a missing attachment reference before patching', async () => {
     stored.set(MESSAGE, message());
     await expect(
@@ -536,6 +582,19 @@ describe('composer delivery and preservation', () => {
       signal,
     );
     expect(result.status).toBe('complete');
+  });
+
+  it('rejects converting a classic message to Components V2', async () => {
+    stored.set(MESSAGE, message());
+    await expect(
+      updateMessage(
+        { channel_id: CHANNEL, message_id: MESSAGE, components: [{ type: 10, content: 'new' }] },
+        signal,
+      ),
+    ).rejects.toMatchObject({
+      issues: [{ message: expect.stringContaining('instead of converting an existing classic') }],
+    });
+    expect(patch).not.toHaveBeenCalled();
   });
 
   it('rejects ambiguous attachment filenames before an upload', async () => {

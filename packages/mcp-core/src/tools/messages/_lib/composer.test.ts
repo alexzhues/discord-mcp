@@ -211,6 +211,17 @@ describe('composeMessage', () => {
     expect(defaults.parts[0]!.body.poll).toMatchObject({ duration: 24, layout_type: 1 });
   });
 
+  it('counts embed field names and values toward the aggregate limit', () => {
+    const fields = [
+      ...Array.from({ length: 4 }, () => ({ name: 'n'.repeat(256), value: 'v'.repeat(1024) })),
+      { name: 'n'.repeat(256), value: 'v'.repeat(624) },
+    ];
+    const withinLimit = composeMessage({ embeds: [{ fields }] });
+    expect(withinLimit.parts).toHaveLength(1);
+    fields[4]!.value += 'v';
+    expect(() => composeMessage({ embeds: [{ fields }] })).toThrow(ValidationError);
+  });
+
   it('supports safe file-only and clear-field edits while rejecting tts edits', () => {
     const fileOnly = composeMessage(
       { files: [{ filename: 'poster.png', data_uri: dataUri('png', 'image/png') }] },
