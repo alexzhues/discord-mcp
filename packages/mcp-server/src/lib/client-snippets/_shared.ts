@@ -15,7 +15,7 @@ import type { SnippetConfig } from './types.js';
  * `--gateway` appended when `cfg.gateway === true`. Env includes
  * `DISCORD_TOKEN` when supplied and merges any extra `cfg.envVars`.
  */
-function renderServerEntry(cfg: SnippetConfig): {
+export function renderServerEntry(cfg: SnippetConfig): {
   command: string;
   args: string[];
   env?: Record<string, string>;

@@ -44,7 +44,7 @@ export interface SnippetConfig {
 /**
  * The rendered output of a generator.
  *
- * `format` distinguishes JSON, TOML, and DeepSeek Harness YAML fragments.
+ * `format` distinguishes JSON, TOML, and YAML fragments.
  *
  * `content` is the literal text the user pastes / the file `init`
  * writes. Always ends with a newline so editors don't whine.

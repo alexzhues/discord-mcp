@@ -148,7 +148,7 @@ export function buildProgram(): Command {
     .option('--profile <name>', 'Stable local profile name (required when not interactive)')
     .option(
       '--client <id>',
-      'MCP client (claude-desktop|claude-code|codex|antigravity-cli|cursor-cli|gemini-cli|grok-cli|cursor|deepseek-harness|generic). Default: prompt if TTY, else "generic".',
+      'MCP client (claude-desktop|claude-code|codex|antigravity-cli|cursor-cli|gemini-cli|grok-cli|cursor|deepseek-harness|vscode|windsurf|devin|cline|roo-code|continue|zed|opencode|generic). Default: prompt if TTY, else "generic".',
     )
     .option('--gateway', 'Enable Discord Gateway resource subscriptions for this profile')
     .option(
@@ -245,12 +245,10 @@ export function buildProgram(): Command {
 
   program
     .command('init')
-    .description(
-      'Generate an MCP client config snippet (Claude Desktop / Claude Code / Codex / Antigravity CLI / Cursor Agent CLI / Gemini CLI compatibility / Cursor editor / Generic)',
-    )
+    .description('Generate an MCP client config snippet for a supported editor or coding client')
     .option(
       '--client <id>',
-      'MCP client (claude-desktop|claude-code|codex|antigravity-cli|cursor-cli|gemini-cli|grok-cli|cursor|deepseek-harness|generic). Default: prompt if TTY, else "generic".',
+      'MCP client (claude-desktop|claude-code|codex|antigravity-cli|cursor-cli|gemini-cli|grok-cli|cursor|deepseek-harness|vscode|windsurf|devin|cline|roo-code|continue|zed|opencode|generic). Default: prompt if TTY, else "generic".',
     )
     .option(
       '--token <token>',

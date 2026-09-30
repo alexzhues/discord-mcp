@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parse as parseYaml } from 'yaml';
 import packageJson from '../../package.json' with { type: 'json' };
 import { loadProfile } from '../lib/profiles.js';
 import { setupAction } from './setup.js';
@@ -77,6 +78,55 @@ function result(): {
 }
 
 describe('guided caller-owned bot setup', () => {
+  it.each([
+    'vscode',
+    'windsurf',
+    'devin',
+    'cline',
+    'roo-code',
+    'continue',
+    'zed',
+    'opencode',
+  ])('persists a %s profile and generates its native launcher without storing the token', async (client) => {
+    await setupAction({
+      profile: 'devbot',
+      client,
+      json: true,
+      profileDirectory: directory,
+    });
+
+    const parsed = result();
+    expect(parsed.ok).toBe(true);
+    const raw = parsed.data?.content ?? '';
+    const doc = client === 'continue' ? parseYaml(raw) : JSON.parse(raw);
+    const entry =
+      client === 'continue'
+        ? doc.mcpServers[0]
+        : (doc.servers ?? doc.context_servers ?? doc.mcp ?? doc.mcpServers)['discord-mcp'];
+    const command = Array.isArray(entry.command) ? entry.command[0] : entry.command;
+    const args = Array.isArray(entry.command) ? entry.command.slice(1) : entry.args;
+    expect(command).toBe('npx');
+    expect(args).toEqual([
+      '--yes',
+      '--loglevel=error',
+      `@discord-mcp/cli@${packageJson.version}`,
+      'serve',
+      '--profile',
+      'devbot',
+    ]);
+    expect(raw).not.toContain(TOKEN);
+    const saved = loadProfile('devbot', { directory });
+    expect(saved).toMatchObject({
+      client,
+      bot: { id: BOT.id },
+      allowedGuilds: [GUILD.id],
+      toolSurface: 'progressive',
+      writeMode: 'preview',
+    });
+    expect(readFileSync(parsed.data?.profile?.path ?? '', 'utf8')).not.toContain(TOKEN);
+    expect(parsed.details).toContain('Verify: discord-mcp doctor --profile devbot --online');
+  });
+
   it('creates a non-secret profile and a client config that activates it at runtime', async () => {
     await setupAction({
       profile: 'devbot',

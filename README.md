@@ -69,7 +69,7 @@ discord-mcp smoke --profile devbot
 
 `setup` verifies your bot, selects a server boundary, and saves a non-secret profile. **Apply the generated configuration to your AI client**; setup does not edit it for you. Launch the client with `DISCORD_TOKEN` available in its environment. The smoke check above does not change Discord.
 
-See [client setup](https://cappyeo.github.io/discord-mcp/start/client-setup/) for Claude, Cursor, other clients, and desktop-app token setup. New to MCP? <a href="https://cappyeo.github.io/discord-mcp/start/"><strong>Get started</strong></a> with the complete tutorial.
+See [client setup](https://cappyeo.github.io/discord-mcp/start/client-setup/) for Claude, Codex, Cursor, VS Code/GitHub Copilot, Windsurf, Cline, Roo Code, Continue, Zed, OpenCode, Devin Local, and other clients, plus desktop-app token setup. New to MCP? <a href="https://cappyeo.github.io/discord-mcp/start/"><strong>Get started</strong></a> with the complete tutorial.
 
 <h2 align="center"><img src="https://raw.githubusercontent.com/cappyeo/discord-mcp/main/.github/assets/readme/section-safety.svg" alt="Safety and deployment" width="720" /></h2>
 

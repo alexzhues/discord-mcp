@@ -33,6 +33,14 @@ const CLIENT_IDS = [
   'gemini-cli',
   'cursor',
   'deepseek-harness',
+  'vscode',
+  'windsurf',
+  'devin',
+  'cline',
+  'roo-code',
+  'continue',
+  'zed',
+  'opencode',
   'generic',
 ] as const;
 const TOOL_SURFACES = ['full', 'progressive'] as const;

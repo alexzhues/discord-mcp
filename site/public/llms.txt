@@ -18,7 +18,7 @@
 
 - Project identity: `cappyeo/discord-mcp`, maintained by `cappyeo`; not an official Discord product or the Model Context Protocol community Discord server.
 - Public npm packages: `@discord-mcp/cli` and `@discord-mcp/core`.
-- Local stdio transport for MCP-compatible clients, including Claude Desktop, Claude Code, Cursor, and generic clients.
+- Local stdio transport for MCP-compatible clients, including Claude Desktop, Claude Code, Codex, Cursor, VS Code/GitHub Copilot, Windsurf, Cline, Roo Code, Continue, Zed, OpenCode, Devin Local, and generic clients.
 - Bearer-protected Streamable HTTP transport for remote MCP hosts, with one deployment credential treated as one caller principal.
 - Typed tool contracts with generated input and output schemas across Discord messaging, moderation, application, media, and monetization workflows.
 - Complete guild builds use a target-bound dry run, exact approval, checkpointed apply/resume, final Discord readback, and authenticated Activity Evidence.
@@ -61,6 +61,7 @@ Activity Evidence is not the `discord-mcp activity` onboarding journal. It is an
 
 - Tutorial: https://cappyeo.github.io/discord-mcp/start/
 - Client configuration: https://cappyeo.github.io/discord-mcp/start/client-setup/
+- Client setup includes host-specific snippets for VS Code (`servers` in `.vscode/mcp.json`), Windsurf/Cline/Roo Code (`mcpServers`), Continue 1.0.0 YAML under `.continue/mcpServers`, Zed (flat `context_servers`), and OpenCode (`mcp` with local command arrays). Windsurf/Cascade follows the current Devin documentation and config paths.
 - Verified outcome: https://cappyeo.github.io/discord-mcp/start/activity-evidence/
 - Production configuration: https://cappyeo.github.io/discord-mcp/operations/configure/
 - Safety model: https://cappyeo.github.io/discord-mcp/architecture/confirmation/
