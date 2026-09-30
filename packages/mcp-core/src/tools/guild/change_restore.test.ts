@@ -385,6 +385,64 @@ it('keeps apply mode after invalid selection', async () => {
   expect((await loadGuildChangeCheckpoint(ref, container.config)).mode).toBe('apply');
 });
 
+it('reconciles a restored in-flight inverse and retains other completed operations', async () => {
+  const second = '666666666666666666';
+  const before = {
+    guild: { id: guild },
+    bot_roles: [targetRole],
+    roles: [
+      { id: guild, position: 0, permissions: '0' },
+      { id: targetRole, position: 10, permissions: '268435472' },
+    ],
+    channels: [
+      { id: channel, name: 'old' },
+      { id: second, name: 'second-old' },
+    ],
+  };
+  const { p, ref } = await plan(
+    {
+      channels: [
+        { id: channel, patch: { name: 'after' } },
+        { id: second, patch: { name: 'second-after' } },
+      ],
+    },
+    before,
+  );
+  const writes: unknown[] = [];
+  handlers(
+    {
+      roles: before.roles,
+      channels: [
+        { id: channel, name: 'old' },
+        { id: second, name: 'second-after' },
+      ],
+    },
+    (body) => writes.push(body),
+  );
+  await saveGuildChangeCheckpoint(
+    ref,
+    { mode: 'restore', completed: [0, 1], inflight: 0 },
+    container.config,
+  );
+  const result = (await tool().run(
+    {
+      guild_id: guild,
+      expected_bot_id: bot,
+      plan_ref: ref,
+      approval_id: p.approval_id,
+      operation_indexes: [0],
+    },
+    { signal: new AbortController().signal },
+  )) as { structuredContent: { restored: number[] } };
+  expect(result.structuredContent.restored).toEqual([0]);
+  expect(writes).toEqual([]);
+  expect(await loadGuildChangeCheckpoint(ref, container.config)).toMatchObject({
+    mode: 'restore',
+    completed: [1],
+    inflight: null,
+  });
+});
+
 it('does not execute later inverses after the first restore REST failure', async () => {
   const second = '333333333333333334';
   const before = {

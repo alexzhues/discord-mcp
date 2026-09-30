@@ -490,6 +490,281 @@ describe('WorkflowEngine', () => {
     }
   });
 
+  it('cancels a queued workflow from the persistent cancel flag before execution begins', async () => {
+    const f = await fixture();
+    let startedId = '';
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const enteredLock = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const withLock = f.store.withLock.bind(f.store);
+    let first = true;
+    const lockSpy = vi.spyOn(f.store, 'withLock').mockImplementation(async (id, fn) => {
+      if (first) {
+        first = false;
+        entered();
+        await held;
+      }
+      return withLock(id, fn);
+    });
+    try {
+      const invoke = vi.fn().mockResolvedValue(ok);
+      const started = await f.engine.start(
+        { target, steps: [{ tool: 'messages_send', args: {} }] },
+        context(invoke),
+      );
+      startedId = started.id;
+      await enteredLock;
+      expect((await f.engine.cancel(started.id, target, context(invoke))).status).toBe(
+        'cancel_requested',
+      );
+      release();
+      await vi.waitFor(
+        async () => expect((await f.store.get(started.id))?.status).toBe('cancelled'),
+        { timeout: 5000, interval: 10 },
+      );
+      expect(invoke).not.toHaveBeenCalled();
+    } finally {
+      release();
+      lockSpy.mockRestore();
+      await waitForLockRelease(f.store, startedId);
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it('honors a persistent cancel flag between completed steps', async () => {
+    const f = await fixture();
+    let startedId = '';
+    const put = f.store.put.bind(f.store);
+    let requested = false;
+    const putSpy = vi.spyOn(f.store, 'put').mockImplementation(async (record) => {
+      await put(record);
+      if (!requested && record.current_step === 1 && record.status === 'running') {
+        requested = true;
+        await f.store.requestCancel(record.id);
+      }
+    });
+    try {
+      const invoke = vi.fn().mockResolvedValue(ok);
+      const started = await f.engine.start(
+        {
+          target,
+          steps: [
+            { tool: 'channels_read', args: {} },
+            { tool: 'channels_read', args: {} },
+          ],
+        },
+        context(invoke),
+      );
+      startedId = started.id;
+      await vi.waitFor(
+        async () => expect((await f.store.get(started.id))?.status).toBe('cancelled'),
+        { timeout: 5000, interval: 10 },
+      );
+      expect(requested).toBe(true);
+      expect(invoke).toHaveBeenCalledOnce();
+      expect((await f.store.get(started.id))?.steps[0]?.state).toBe('success');
+      expect((await f.store.get(started.id))?.steps[1]?.state).toBe('pending');
+    } finally {
+      putSpy.mockRestore();
+      await waitForLockRelease(f.store, startedId);
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it('marks a safe workflow failed when its terminal checkpoint cannot be written', async () => {
+    const f = await fixture();
+    let startedId = '';
+    const put = f.store.put.bind(f.store);
+    let writes = 0;
+    const invoke = vi.fn().mockResolvedValue(ok);
+    const spy = vi.spyOn(f.store, 'put').mockImplementation(async (record) => {
+      if (++writes === 4) throw new Error('Checkpoint replacement failed');
+      await put(record);
+    });
+    try {
+      const started = await f.engine.start(
+        { target, steps: [{ tool: 'channels_read', args: {} }] },
+        context(invoke),
+      );
+      startedId = started.id;
+      await vi.waitFor(
+        async () => {
+          const record = await f.store.get(started.id);
+          expect(record?.status).toBe('failed');
+          expect(record?.failure?.code).toBe('WORKFLOW_ENGINE_ERROR');
+        },
+        { timeout: 10_000 },
+      );
+      expect(invoke).toHaveBeenCalledOnce();
+    } finally {
+      spy.mockRestore();
+      await waitForLockRelease(f.store, startedId);
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it('skips a previously successful step when resuming from the next checkpoint', async () => {
+    const f = await fixture();
+    let startedId = '';
+    try {
+      const invoke = vi.fn().mockRejectedValueOnce(new Error('temporary')).mockResolvedValue(ok);
+      const started = await f.engine.start(
+        {
+          target,
+          steps: [
+            { tool: 'channels_read', args: {} },
+            { tool: 'channels_read', args: {} },
+          ],
+        },
+        context(invoke),
+      );
+      startedId = started.id;
+      await vi.waitFor(async () => expect((await f.store.get(started.id))?.status).toBe('failed'), {
+        timeout: 5000,
+        interval: 10,
+      });
+      await waitForLockRelease(f.store, started.id);
+      const failed = await f.store.get(started.id);
+      if (failed === undefined) throw new Error('checkpoint disappeared');
+      await f.store.put({
+        ...failed,
+        status: 'queued',
+        current_step: 0,
+        steps: [{ ...failed.steps[0]!, state: 'success' }, failed.steps[1]!],
+      });
+      expect((await f.engine.resume(started.id, target, context(invoke))).status).toBe('queued');
+      await vi.waitFor(
+        async () => expect((await f.store.get(started.id))?.status).toBe('completed'),
+        { timeout: 5000, interval: 10 },
+      );
+      expect(invoke).toHaveBeenCalledTimes(2);
+    } finally {
+      await waitForLockRelease(f.store, startedId);
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it('resets a safe in-flight checkpoint and clears failure from a fresh engine', async () => {
+    const f = await fixture();
+    let startedId = '';
+    try {
+      const invoke = vi.fn().mockRejectedValueOnce(new Error('temporary')).mockResolvedValue(ok);
+      const started = await f.engine.start(
+        { target, steps: [{ tool: 'channels_read', args: {} }] },
+        context(invoke),
+      );
+      startedId = started.id;
+      await vi.waitFor(async () => expect((await f.store.get(started.id))?.status).toBe('failed'), {
+        timeout: 5000,
+        interval: 10,
+      });
+      await waitForLockRelease(f.store, started.id);
+      const fresh = new WorkflowEngine({
+        store: f.store,
+        resolvePolicy: () => ({ idempotent: true, retry_safe: true }),
+      });
+      expect((await fresh.resume(started.id, target, context(invoke))).status).toBe('queued');
+      await vi.waitFor(
+        async () => expect((await f.store.get(started.id))?.status).toBe('completed'),
+        { timeout: 5000, interval: 10 },
+      );
+      expect((await f.store.get(started.id))?.failure).toBeUndefined();
+      expect(invoke).toHaveBeenCalledTimes(2);
+    } finally {
+      await waitForLockRelease(f.store, startedId);
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it.each([
+    {
+      name: 'a persisted bot target drift',
+      originalTarget: target,
+      args: { bot_id: target.bot_id },
+      tamperedTarget: { ...target, bot_id: '999999999999999999' },
+      expectedFailure: 'WORKFLOW_TARGET_REJECTED',
+    },
+    {
+      name: 'a persisted unbound bot target',
+      originalTarget: target,
+      args: { bot_id: target.bot_id },
+      tamperedTarget: {
+        profile_id: target.profile_id,
+        guild_id: target.guild_id,
+      },
+      expectedFailure: 'WORKFLOW_TARGET_REJECTED',
+    },
+    {
+      name: 'a persisted channel target drift',
+      originalTarget: { ...target, channel_id: '111111111111111111' },
+      args: { channel_id: '111111111111111111' },
+      tamperedTarget: { ...target, channel_id: '222222222222222222' },
+      expectedFailure: 'WORKFLOW_TARGET_REJECTED',
+    },
+    {
+      name: 'a persisted unbound channel target',
+      originalTarget: { ...target, channel_id: '111111111111111111' },
+      args: { channel_id: '111111111111111111' },
+      tamperedTarget: { profile_id: target.profile_id, bot_id: target.bot_id },
+      expectedFailure: 'WORKFLOW_TARGET_REJECTED',
+    },
+  ])('rejects $name before invoking the tool', async ({
+    originalTarget,
+    args,
+    tamperedTarget,
+    expectedFailure,
+  }) => {
+    const f = await fixture();
+    let startedId = '';
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const enteredLock = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const withLock = f.store.withLock.bind(f.store);
+    let first = true;
+    const lockSpy = vi.spyOn(f.store, 'withLock').mockImplementation(async (id, fn) => {
+      if (first) {
+        first = false;
+        entered();
+        await held;
+      }
+      return withLock(id, fn);
+    });
+    try {
+      const invoke = vi.fn().mockResolvedValue(ok);
+      const started = await f.engine.start(
+        { target: originalTarget, steps: [{ tool: 'channels_read', args }] },
+        context(invoke, originalTarget),
+      );
+      startedId = started.id;
+      await enteredLock;
+      const record = await f.store.get(started.id);
+      if (record === undefined) throw new Error('checkpoint disappeared');
+      await f.store.put({ ...record, target: tamperedTarget });
+      release();
+      await vi.waitFor(async () => expect((await f.store.get(started.id))?.status).toBe('failed'), {
+        timeout: 5000,
+        interval: 10,
+      });
+      expect((await f.store.get(started.id))?.failure?.code).toBe(expectedFailure);
+      expect(invoke).not.toHaveBeenCalled();
+    } finally {
+      release();
+      lockSpy.mockRestore();
+      await waitForLockRelease(f.store, startedId);
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
   it('rejects active resume without resetting the running checkpoint', async () => {
     const f = await fixture();
     try {
@@ -667,6 +942,7 @@ describe('WorkflowEngine', () => {
 
   it('rejects an authorizer scope before invoking the tool', async () => {
     const f = await fixture();
+    let startedId = '';
     try {
       const invoke = vi.fn().mockResolvedValue(ok);
       const authorize = vi.fn().mockRejectedValue(new Error('scope denied'));
@@ -682,11 +958,13 @@ describe('WorkflowEngine', () => {
         },
         context(invoke, target, authorize),
       );
+      startedId = started.id;
       for (let i = 0; i < 1000 && (await f.store.get(started.id))?.status !== 'failed'; i += 1)
         await new Promise((resolve) => setTimeout(resolve, 10));
       expect((await f.store.get(started.id))?.failure?.code).toBe('WORKFLOW_TARGET_REJECTED');
       expect(invoke).not.toHaveBeenCalled();
     } finally {
+      await waitForLockRelease(f.store, startedId);
       await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
   });

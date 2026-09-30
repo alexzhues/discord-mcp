@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -116,6 +117,9 @@ describe('WorkflowStore', () => {
       await expect(store.withLock('../escape', async () => undefined)).rejects.toThrow(
         /Invalid workflow ID/,
       );
+      await expect(store.requestCancel('../escape')).rejects.toThrow(/Invalid workflow ID/);
+      await expect(store.isCancelRequested('../escape')).rejects.toThrow(/Invalid workflow ID/);
+      await expect(store.clearCancel('../escape')).rejects.toThrow(/Invalid workflow ID/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -151,6 +155,26 @@ describe('WorkflowStore', () => {
         }),
       );
       await Promise.all([writes, reads]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('tracks cancellation through the same checkpoint access queue', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'discord-mcp-workflow-cancel-'));
+    try {
+      const store = new WorkflowStore(dir, 'workflow-test-integrity-key-01234567890123456789');
+      await store.init();
+      expect(await store.isCancelRequested(record.id)).toBe(false);
+      await store.requestCancel(record.id);
+      expect(await store.isCancelRequested(record.id)).toBe(true);
+      await store.clearCancel(record.id);
+      expect(await store.isCancelRequested(record.id)).toBe(false);
+      const cancelPath = join(dir, `${record.id}.cancel`);
+      const { mkdir } = await import('node:fs/promises');
+      await mkdir(cancelPath);
+      await expect(store.isCancelRequested(record.id)).rejects.toThrow();
+      await rm(cancelPath, { recursive: true, force: true });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -243,6 +267,34 @@ describe('WorkflowStore', () => {
         updated_at: '2026-01-01T00:00:20.000Z',
       });
     } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('cleans a recovery marker when a stale lock owner changes during recovery', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'discord-mcp-workflow-lock-race-'));
+    const lockPath = join(dir, `${record.id}.lock`);
+    try {
+      const store = new WorkflowStore(dir, 'workflow-test-integrity-key-01234567890123456789');
+      await store.init();
+      await writeFile(lockPath, '99999999\n');
+      let firstProbe = true;
+      const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
+        if (firstProbe) {
+          firstProbe = false;
+          writeFileSync(lockPath, '99999998\n');
+        }
+        const error = new Error('dead') as NodeJS.ErrnoException;
+        error.code = 'ESRCH';
+        throw error;
+      });
+      await expect(store.withLock(record.id, async () => undefined)).rejects.toThrow(
+        /already being executed/,
+      );
+      expect(await readFile(`${lockPath}.recover`).catch(() => undefined)).toBeUndefined();
+      kill.mockRestore();
+    } finally {
+      vi.restoreAllMocks();
       await rm(dir, { recursive: true, force: true });
     }
   });

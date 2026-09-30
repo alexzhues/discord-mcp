@@ -85,6 +85,18 @@ async function runPlan(changes: Record<string, unknown>, botPermissions = '26843
 }
 
 describe('guild_change_plan handler', () => {
+  it('blocks an overwrite whose channel is absent from the live guild snapshot', async () => {
+    const result = await runPlan({
+      permission_overwrites: [
+        { channel_id: '999999999999999999', overwrite_id: EDITABLE_ROLE, type: 0, allow: '16' },
+      ],
+    });
+    expect(result.structuredContent.status).toBe('blocked');
+    expect(result.structuredContent.blockers).toContainEqual(
+      expect.objectContaining({ code: 'CHANNEL_NOT_FOUND' }),
+    );
+    expect(result.structuredContent.plan_ref).toBeNull();
+  });
   it('creates a ready plan with typed channel, role, and overwrite before/after projections', async () => {
     const result = await runPlan({
       channels: [{ id: CHANNEL, patch: { name: 'support', parent_id: CATEGORY } }],

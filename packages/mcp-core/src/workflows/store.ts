@@ -203,10 +203,6 @@ export class WorkflowStore {
     } finally {
       await handle.close();
       await rm(this.lockPath(id), { force: true });
-      if (recovery !== undefined) {
-        await recovery.close();
-        await rm(recoveryPath, { force: true });
-      }
     }
   }
 }
