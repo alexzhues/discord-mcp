@@ -106,6 +106,70 @@ describe('WorkflowEngine', () => {
     }
   });
 
+  it('rejects a malformed profile even when the trusted context matches it', async () => {
+    const f = await fixture();
+    const malformed = { profile_id: '../private' };
+    try {
+      await expect(
+        f.engine.start(
+          { target: malformed, steps: [{ tool: 'channels_read', args: {} }] },
+          context(async () => ok, malformed as typeof target),
+        ),
+      ).rejects.toThrow(/trusted bot profile binding/);
+    } finally {
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it('rejects a bound channel step whose channel differs from the trusted target', async () => {
+    const f = await fixture();
+    const boundTarget = { ...target, channel_id: '111111111111111111' };
+    try {
+      await expect(
+        f.engine.start(
+          {
+            target: boundTarget,
+            steps: [{ tool: 'messages_send', args: { channel_id: '222222222222222222' } }],
+          },
+          context(async () => ok, boundTarget),
+        ),
+      ).rejects.toThrow(/target drift: channel_id/);
+    } finally {
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it('ignores a duplicate executor that observes a terminal checkpoint', async () => {
+    const f = await fixture();
+    let startedId = '';
+    const get = f.store.get.bind(f.store);
+    let reads = 0;
+    const getSpy = vi.spyOn(f.store, 'get').mockImplementation(async (id) => {
+      const record = await get(id);
+      if (record !== undefined && reads++ === 0) return { ...record, status: 'completed' };
+      return record;
+    });
+    try {
+      const invoke = vi.fn().mockResolvedValue(ok);
+      const started = await f.engine.start(
+        { target, steps: [{ tool: 'channels_read', args: {} }] },
+        context(invoke),
+      );
+      startedId = started.id;
+      await vi.waitFor(() => expect(getSpy).toHaveBeenCalledOnce(), {
+        timeout: 5000,
+        interval: 10,
+      });
+      await waitForLockRelease(f.store, started.id);
+      expect(invoke).not.toHaveBeenCalled();
+      expect((await get(started.id))?.status).toBe('queued');
+    } finally {
+      getSpy.mockRestore();
+      await waitForLockRelease(f.store, startedId);
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
   it('marks an in-flight non-idempotent step for review after a fresh engine resumes', async () => {
     const f = await fixture();
     try {

@@ -11,13 +11,13 @@ export function resolveBlueprintStateDirectory(config: Config): string {
   }
   if (process.platform === 'win32') {
     const base = process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local');
-    return resolve(base, 'discord-mcp', 'blueprints');
+    return resolveBlueprintStatePath(resolveBlueprintStatePath(base, 'discord-mcp'), 'blueprints');
   }
   if (process.platform === 'darwin') {
     return join(homedir(), 'Library', 'Application Support', 'discord-mcp', 'blueprints');
   }
   const base = process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state');
-  return resolve(base, 'discord-mcp', 'blueprints');
+  return resolveBlueprintStatePath(resolveBlueprintStatePath(base, 'discord-mcp'), 'blueprints');
 }
 
 /** Resolve one generated state artifact without allowing a caller-controlled path segment. */
