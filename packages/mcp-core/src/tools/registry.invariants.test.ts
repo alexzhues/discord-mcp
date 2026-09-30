@@ -1,5 +1,5 @@
 /**
- * Registry-wide invariants over all 218 tools.
+ * Registry-wide invariants over all 221 tools.
  *
  * These are the checks that per-tool test files structurally cannot make: a
  * tool that forgets its confirm gate, mislabels itself as read-only, or
@@ -13,7 +13,7 @@
  */
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { DiscordAccessRequirement } from '../access/requirements.js';
 import {
@@ -53,29 +53,35 @@ beforeAll(async () => {
     .filter((e) => e.isDirectory() && !e.name.startsWith('_'))
     .map((e) => e.name);
 
-  for (const category of categories) {
-    const dir = join(TOOLS_DIR, category);
-    const files = readdirSync(dir).filter(
-      (f) =>
-        f.endsWith('.ts') &&
-        !f.endsWith('.test.ts') &&
-        !f.endsWith('.bench.ts') &&
-        !f.startsWith('_'),
-    );
-    for (const file of files) {
-      const sourcePath = join(dir, file);
-      const mod = await import(`file://${sourcePath.replace(/\\/g, '/')}`);
-      const meta = (mod.default as { __toolMetadata?: ToolMeta } | undefined)?.__toolMetadata;
-      if (meta === undefined) continue;
-      tools.push({ ...meta, preconditions: meta.preconditions ?? [], sourcePath });
-    }
-  }
+  const imported = await Promise.all(
+    categories.flatMap((category) => {
+      const dir = join(TOOLS_DIR, category);
+      const files = readdirSync(dir)
+        .filter(
+          (f) =>
+            f.endsWith('.ts') &&
+            !f.endsWith('.test.ts') &&
+            !f.endsWith('.bench.ts') &&
+            !f.startsWith('_'),
+        )
+        .sort();
+      return files.map(async (file) => {
+        const sourcePath = join(dir, file);
+        const mod = await import(pathToFileURL(sourcePath).href);
+        const meta = (mod.default as { __toolMetadata?: ToolMeta } | undefined)?.__toolMetadata;
+        return meta === undefined
+          ? undefined
+          : { ...meta, preconditions: meta.preconditions ?? [], sourcePath };
+      });
+    }),
+  );
+  tools = imported.filter((tool): tool is ToolMeta => tool !== undefined);
   tools = tools.sort((a, b) => a.name.localeCompare(b.name));
 });
 
 describe('tool registry invariants', () => {
   it('discovers the full advertised tool surface', () => {
-    expect(tools.length).toBe(218);
+    expect(tools.length).toBe(221);
     expect(new Set(tools.map((t) => t.name)).size).toBe(tools.length);
     expect(new Set(tools.map((t) => t.category)).size).toBe(31);
   });

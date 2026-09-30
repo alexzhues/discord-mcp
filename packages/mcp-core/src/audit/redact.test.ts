@@ -101,6 +101,34 @@ describe('redactArgs (Plan 8 Phase F - per-tool + recursive)', () => {
       expect(out.content).toBe('[REDACTED:7ch]');
     });
 
+    it.each([
+      'messages_compose',
+      'messages_publish',
+      'messages_update',
+    ])('%s drops rich content and file bytes from audit args', (tool) => {
+      const dataUri = `data:image/png;base64,${'A'.repeat(512)}`;
+      const out = redactArgs(
+        {
+          channel_id: '111',
+          message_id: '222',
+          content: 'private draft',
+          embeds: [{ description: 'private embed' }],
+          components: [{ type: 1, label: 'private button' }],
+          poll: { question: 'private poll' },
+          files: [{ name: 'secret.png', data_uri: dataUri }],
+        },
+        tool,
+      );
+      expect(out.channel_id).toBe('111');
+      expect(out.message_id).toBe('222');
+      expect(out.content).toBe('[REDACTED:13ch]');
+      expect(out.embeds).toBe('[REDACTED:value]');
+      expect(out.components).toBe('[REDACTED:value]');
+      expect(out.poll).toBe('[REDACTED:value]');
+      expect(out.files).toBe('[REDACTED:value]');
+      expect(JSON.stringify(out)).not.toContain(dataUri);
+    });
+
     it('messages_bulk_delete redacts message_ids array (length only, no IDs leaked)', () => {
       const out = redactArgs(
         { channel_id: '111', message_ids: ['1', '2', '3'] },
@@ -280,6 +308,9 @@ describe('redactArgs (Plan 8 Phase F - per-tool + recursive)', () => {
         'app_emojis_create',
         'messages_send',
         'messages_edit',
+        'messages_compose',
+        'messages_publish',
+        'messages_update',
         'messages_bulk_delete',
         'webhooks_execute',
         'webhooks_edit_message',
@@ -456,28 +487,34 @@ describe('redactArgs vs. the live tool registry', () => {
       .filter((e) => e.isDirectory() && !e.name.startsWith('_'))
       .map((e) => e.name);
 
-    for (const category of categories) {
-      const dir = join(TOOLS_DIR, category);
-      const files = readdirSync(dir).filter(
-        (f) =>
-          f.endsWith('.ts') &&
-          !f.endsWith('.test.ts') &&
-          !f.endsWith('.bench.ts') &&
-          !f.startsWith('_'),
-      );
-      for (const file of files) {
-        const mod = await import(`file://${join(dir, file).replace(/\\/g, '/')}`);
-        const meta = (
-          mod.default as
-            | { __toolMetadata?: { name: string; inputSchema: Record<string, unknown> } }
-            | undefined
-        )?.__toolMetadata;
-        if (meta === undefined) continue;
-        for (const key of Object.keys(meta.inputSchema)) {
-          if (CREDENTIAL_KEY_RE.test(key)) credentialArgs.push({ tool: meta.name, key });
-        }
-      }
-    }
+    const categoryResults = await Promise.all(
+      categories.map(async (category) => {
+        const dir = join(TOOLS_DIR, category);
+        const files = readdirSync(dir).filter(
+          (f) =>
+            f.endsWith('.ts') &&
+            !f.endsWith('.test.ts') &&
+            !f.endsWith('.bench.ts') &&
+            !f.startsWith('_'),
+        );
+        const fileResults = await Promise.all(
+          files.map(async (file) => {
+            const mod = await import(`file://${join(dir, file).replace(/\\/g, '/')}`);
+            const meta = (
+              mod.default as
+                | { __toolMetadata?: { name: string; inputSchema: Record<string, unknown> } }
+                | undefined
+            )?.__toolMetadata;
+            if (meta === undefined) return [];
+            return Object.keys(meta.inputSchema)
+              .filter((key) => CREDENTIAL_KEY_RE.test(key))
+              .map((key) => ({ tool: meta.name, key }));
+          }),
+        );
+        return fileResults.flat();
+      }),
+    );
+    credentialArgs.push(...categoryResults.flat());
   });
 
   it('redacts every credential-shaped arg name in the registry', () => {

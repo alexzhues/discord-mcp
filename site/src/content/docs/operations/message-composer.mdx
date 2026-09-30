@@ -1,0 +1,123 @@
+---
+title: Rich message composer
+description: Draft, publish, and update Discord announcements with text, embeds, files, polls, and Components V2.
+sidebar:
+  order: 4
+---
+
+The rich message composer turns one announcement into a reviewable workflow. Use
+`messages_compose` to create a local preview, `messages_publish` to send the
+approved draft, and `messages_update` to edit one published message.
+
+The preview is read-only. It shows the final layout, the message parts that will
+be sent, and file metadata including filename, size, and hash. File bytes are not
+included in the preview. Files must be supplied as bounded `data_uri` values;
+the composer does not fetch URLs or read paths from the host filesystem.
+This is a structured payload preview, not a rendered Discord visual preview.
+Each draft accepts at most ten files with a combined decoded size of 2 MiB.
+New files use simple filenames containing letters, numbers, dots, underscores,
+or hyphens. Adding files during an update must keep the total attachment count
+at ten or fewer.
+
+## Draft a tournament announcement
+
+Ask the client to call `messages_compose` with a structured message. This
+read-only preview has no Discord target; the channel is supplied later to
+`messages_publish`. A small draft can look like this:
+
+```json
+{
+  "content": "## Weekend tournament\nRegistration closes Friday at 18:00 KST.",
+  "embeds": [
+    {
+      "title": "Saturday bracket",
+      "description": "Check in at 19:30 KST. Matches begin at 20:00.",
+      "color": 5793266
+    }
+  ],
+  "poll": {
+    "question": { "text": "Which format should we use?" },
+    "answers": [
+      { "poll_media": { "text": "Single elimination" } },
+      { "poll_media": { "text": "Round robin" } }
+    ],
+    "duration": 24,
+    "allow_multiselect": false
+  },
+  "files": [
+    {
+      "filename": "tournament-rules.txt",
+      "data_uri": "data:text/plain;base64,aGVsbG8=",
+      "description": "Tournament rules"
+    }
+  ],
+  "allowed_mentions": { "parse": [] }
+}
+```
+
+The composer splits content longer than Discord's message limit into at most ten
+parts. Classic content, embeds, and polls remain classic message parts. A
+Components V2 layout is kept as its own V2 part and is not mixed into a classic
+part. `allowed_mentions.parse` defaults to an empty array, so a draft does not
+accidentally ping a role, user, or everyone.
+
+Review the preview and its file hashes before publishing. A preview does not
+write to Discord and does not create a confirmation credential.
+
+## Publish the approved draft
+
+The compose result contains a local `draft_hash`. This identifies the offline
+preview; it is different from the target-bound `payload_hash` issued by
+`messages_publish`. To publish, first call `messages_publish` with the same
+draft plus `channel_id`. That first call performs no Discord write and returns a
+bounded review, `payload_hash`, and one-time `approval_id`. After approval,
+repeat the call with `__confirm: true`, the unchanged `__confirm_hash` and
+`__confirm_id`, and the configured `MCP_DRY_RUN=false` and
+`MCP_WRITE_MODE=allow`.
+
+The confirmed call sends every planned part, then reads the messages back and
+returns receipts with message IDs, URLs, and readback status. If a send is
+retried, the exact-hash and one-time approval checks prevent a different draft
+from being substituted.
+
+Before the first `messages_publish` call, configure `MCP_DRY_RUN=false` and
+`MCP_WRITE_MODE=allow`. The write policy runs before the payload approval layer;
+otherwise the call can stop at the write-policy preview and never issue the
+target-bound approval described above.
+
+Publishing is a confirmed write. Keep the returned receipts as the record of
+what Discord accepted; a successful request is not a claim that custom button
+actions are running.
+
+## Update the announcement
+
+Use `messages_update` for one existing message after reading it back. Omitted
+fields are preserved; when new files are added, existing attachments are kept,
+so an update can add a revised bracket without silently dropping the original
+rules file. New filenames must differ from retained attachments. The tool
+returns a receipt and independent readback status.
+
+If the response is lost after an upload edit, the tool avoids automatically
+repeating the upload and returns the existing message link with an unknown edit
+outcome. `sent_count: 0` means Discord did not confirm the edit; check the receipt's
+readback status before approving another attempt.
+
+Polls and TTS cannot be edited through this tool. A Components V2 message cannot
+be converted to classic, and a classic message cannot be converted to
+Components V2 through this tool; create a new message when the layout family
+must change. The update operation is also a confirmed write.
+
+Discord's Message object lists attached files that are not referenced by an
+embed or component. A file used through `attachment://...` can therefore be
+absent from `attachments[]` on readback, so its receipt may be `unverified` even
+when Discord accepted the message. If an existing embed or component references
+an attachment absent from the returned list, the composer refuses to add new
+files because retention cannot be proven. Publish a new message in that case.
+
+## Scope boundary
+
+This composer handles drafting, preview, publishing, file metadata, polls, and
+single-message updates. Buttons and select menus that need a custom runtime
+still require the separate interaction runtime work: the composer can publish
+the components, but it does not provide a long-running handler for their custom
+actions.

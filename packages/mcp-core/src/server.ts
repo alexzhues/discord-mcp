@@ -188,6 +188,7 @@ import MembersRemoveRole from './tools/members/remove_role.js';
 import MembersSearch from './tools/members/search.js';
 import MembersUnban from './tools/members/unban.js';
 import MessagesBulkDelete from './tools/messages/bulk_delete.js';
+import MessagesCompose from './tools/messages/compose.js';
 import MessagesContext from './tools/messages/context.js';
 import MessagesCreateThread from './tools/messages/create_thread.js';
 import MessagesCrosspost from './tools/messages/crosspost.js';
@@ -196,10 +197,12 @@ import MessagesEdit from './tools/messages/edit.js';
 import MessagesGet from './tools/messages/get.js';
 import MessagesListPins from './tools/messages/list_pins.js';
 import MessagesPin from './tools/messages/pin.js';
+import MessagesPublish from './tools/messages/publish.js';
 import MessagesRead from './tools/messages/read.js';
 import MessagesSearchRecent from './tools/messages/search_recent.js';
 import MessagesSend from './tools/messages/send.js';
 import MessagesUnpin from './tools/messages/unpin.js';
+import MessagesUpdate from './tools/messages/update.js';
 import DiscordIntentPlan from './tools/meta/discord_intent_plan.js';
 import McpPipeline from './tools/meta/pipeline.js';
 import WorkflowCancel from './tools/meta/workflow-cancel.js';
@@ -511,7 +514,7 @@ function getToolCategories(toolStore: ToolStore): ReadonlyMap<string, string> {
   return categories;
 }
 
-/** Compile one tool contract on first use instead of all 218 at HTTP startup. */
+/** Compile one tool contract on first use instead of all 221 at HTTP startup. */
 function compileToolContracts(tool: Tool): ToolContractVariants {
   const cached = compiledToolContracts.get(tool);
   if (cached !== undefined) return cached;
@@ -1456,6 +1459,18 @@ async function createSharedToolStore(): Promise<ToolStore> {
     piece: ComponentsV2SendFromTemplate as unknown as ConcreteTool,
   });
   await toolStore.loadPiece({
+    name: 'messages_compose',
+    piece: MessagesCompose as unknown as ConcreteTool,
+  });
+  await toolStore.loadPiece({
+    name: 'messages_publish',
+    piece: MessagesPublish as unknown as ConcreteTool,
+  });
+  await toolStore.loadPiece({
+    name: 'messages_update',
+    piece: MessagesUpdate as unknown as ConcreteTool,
+  });
+  await toolStore.loadPiece({
     name: 'mcp_pipeline',
     piece: McpPipeline as unknown as ConcreteTool,
   });
@@ -1864,7 +1879,7 @@ export async function buildServer(deps: BuildServerDeps): Promise<BuildServerRes
           'MCP_CATEGORIES; every dispatched call still passes all normal policy gates.',
         ]
       : [
-          'Discord MCP server: 218 tools for Discord operations, Guild Templates, and explicit external inspiration discovery (messages, channels,',
+          'Discord MCP server: 221 tools for Discord operations, Guild Templates, and explicit external inspiration discovery (messages, channels,',
           'threads, members, roles, guild, webhooks, invites, events, commands, reactions,',
           'emojis, stickers, automod, polls, stages, soundboard, voice, onboarding,',
           'monetization, components-v2, intelligence) plus mcp_pipeline for chaining calls and discord_intent_plan for bounded read-only planning.',
@@ -1894,7 +1909,7 @@ export async function buildServer(deps: BuildServerDeps): Promise<BuildServerRes
           : []),
         'Destructive tools return DRY_RUN_PREVIEW unless the server runs with',
         'MCP_DRY_RUN=false AND the call passes __confirm:true.',
-        'Components V2 send/edit/template writes additionally require the exact payload_hash and one-time approval_id from a preview via __confirm_hash and __confirm_id; a changed payload or replayed approval is rejected.',
+        'Components V2 send/edit/template writes and messages_publish/messages_update additionally require the exact payload_hash and one-time approval_id from a preview via __confirm_hash and __confirm_id; a changed payload or replayed approval is rejected.',
         'discord_intent_plan is a read-only deterministic planner for a small set of explicit channel workflows; it never executes its returned steps.',
         'For an existing guild, use guild_change_plan with typed bounded changes, inspect permissions_member_access_report, then guild_change_apply only after exact-payload approval. Restore only supported selected configuration fields with guild_change_restore.',
         'Use messages_context for bounded cited channel or thread history; coverage reports omitted or inaccessible data. It does not provide a persistent server-wide index.',

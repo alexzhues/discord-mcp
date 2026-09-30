@@ -73,17 +73,19 @@ const AMBIGUOUS_NETWORK_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'EN
  *     proxy 502s) when status is 5xx.
  *  4. Plain `Error` whose `code` matches a known retryable network code.
  *
- * `opts.method` is the HTTP verb the call was made with.  For `post` the
- * AMBIGUOUS classes - 5xx and the post-send network codes - are reported as
- * non-retryable, because a POST whose response was lost may already have
- * created the resource.  429 and the pre-send network codes are explicit
- * rejections with no duplicate risk and stay retryable for POST too.
+ * `opts.method` is the HTTP verb the call was made with.  For `post` and
+ * multipart `patch` (`hasFiles:true`), the AMBIGUOUS classes - 5xx and the
+ * post-send network codes - are reported as non-replayable, because the
+ * write may already have landed while its response was lost.  429 and the
+ * pre-send network codes are explicit rejections with no duplicate risk and
+ * stay retryable for both write forms.
  */
 export function classifyDiscordError(
   err: unknown,
-  opts?: { method?: string },
+  opts?: { method?: string; hasFiles?: boolean },
 ): DiscordRetryableError | null {
-  const isPost = opts?.method === 'post';
+  const isAmbiguousWrite =
+    opts?.method === 'post' || (opts?.method === 'patch' && opts?.hasFiles === true);
 
   // --- 429: rate limit ---
   if (err instanceof RateLimitError) {
@@ -94,8 +96,8 @@ export function classifyDiscordError(
   // --- DiscordAPIError: only 5xx are retryable ---
   if (err instanceof DiscordAPIError) {
     if (err.status >= 500 && err.status < 600) {
-      // POST: surface it (the breaker must count it) but mark it un-replayable.
-      return new DiscordRetryableError(err, null, !isPost);
+      // Ambiguous writes still feed the breaker, but are not replayed.
+      return new DiscordRetryableError(err, null, !isAmbiguousWrite);
     }
     // Some Discord 4xx responses include a 429 status - handle defensively.
     if (err.status === 429) {
@@ -110,7 +112,7 @@ export function classifyDiscordError(
   // --- HTTPError: low-level fetch / proxy failure ---
   if (err instanceof HTTPError) {
     if (err.status >= 500 && err.status < 600) {
-      return new DiscordRetryableError(err, null, !isPost);
+      return new DiscordRetryableError(err, null, !isAmbiguousWrite);
     }
     return null;
   }
@@ -118,9 +120,9 @@ export function classifyDiscordError(
   // --- Network-level: ECONNRESET / ETIMEDOUT / ENOTFOUND / etc ---
   const isNetworkFailure = (code: unknown): boolean =>
     typeof code === 'string' && RETRYABLE_NETWORK_CODES.has(code);
-  /** Ambiguous only for POST: the request may already have reached Discord. */
+  /** Ambiguous writes may already have reached Discord before the error. */
   const replaySafeFor = (code: unknown): boolean =>
-    !(isPost && typeof code === 'string' && AMBIGUOUS_NETWORK_CODES.has(code));
+    !(isAmbiguousWrite && typeof code === 'string' && AMBIGUOUS_NETWORK_CODES.has(code));
 
   if (err instanceof Error) {
     const code = (err as Error & { code?: unknown }).code;

@@ -9,7 +9,7 @@ This page records user-visible changes for each tagged release. For the exact
 commit history and downloadable artifacts, see
 [GitHub releases](https://github.com/cappyeo/discord-mcp/releases).
 
-## v0.31.0 - Existing server changes, sourced context, and durable workflows
+## v0.31.0 - Guild changes, sourced context, workflows, and rich messages
 
 Released 2026-10-01.
 
@@ -23,6 +23,19 @@ Released 2026-10-01.
 - Extended the MCP Apps preview with before/after changes, member access, source
   messages, and read-only workflow progress refresh. Plain text and structured
   results remain available to clients without an Apps renderer.
+- Added `messages_compose`, `messages_publish`, and `messages_update` for
+  structured rich-message drafting, exact approval-bound publication, and
+  single-message edits with receipts and readback status. Previews describe
+  the structured payload and file metadata; they do not render a visual
+  Discord preview.
+- Rich sends support bounded content splitting, embeds, Components V2, polls,
+  and base64 uploads. Sparse updates preserve existing fields and attachments
+  where Discord exposes them, while unsafe hidden-attachment cases, unsupported
+  poll/TTS edits, layout-family conversion, and payloads beyond the documented
+  limits are rejected safely.
+- Hardened workflow checkpoints under concurrent Windows readers and stopped
+  workflows on unverified message deliveries before any following step.
+- Updated the transitive gRPC dependency to its security-patched release.
 
 ## v0.30.0 - MCP protocol modernization and blueprint preview
 

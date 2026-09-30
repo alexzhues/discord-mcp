@@ -1,6 +1,6 @@
 import type { REST } from '@discordjs/rest';
 import { DiscordAPIError } from '@discordjs/rest';
-import { handleType, type IPolicy, retry } from 'cockatiel';
+import { handleType, handleWhen, type IPolicy, retry } from 'cockatiel';
 import { describe, expect, it, vi } from 'vitest';
 import { classifyDiscordError, DiscordRetryableError } from './errors.js';
 import { wrapRestWithResilience } from './resilient.js';
@@ -48,6 +48,16 @@ function fastRetryPolicy(): IPolicy {
     maxAttempts: 2,
     backoff: { next: () => ({ duration: 0, next: () => ({ duration: 0 }) }) } as never,
   }) as unknown as IPolicy;
+}
+
+function replaySafeRetryPolicy(): IPolicy {
+  return retry(
+    handleWhen((error) => error instanceof DiscordRetryableError && error.replaySafe),
+    {
+      maxAttempts: 2,
+      backoff: { next: () => ({ duration: 0, next: () => ({ duration: 0 }) }) } as never,
+    },
+  ) as unknown as IPolicy;
 }
 
 /** Build a fake REST whose verb methods record args + can be told what to throw. */
@@ -238,6 +248,60 @@ describe('wrapRestWithResilience (Plan 8 C.3)', () => {
 
     const result = await wrapped.get('/channels/1');
     expect(result).toEqual({ id: 'ok' });
+    expect(count).toBe(2);
+  });
+
+  it('does not replay a multipart PATCH after an ambiguous 5xx', async () => {
+    const apiErr500 = new DiscordAPIError(
+      { code: 0, message: 'upstream' },
+      0,
+      503,
+      'PATCH',
+      'https://discord.com/api/v10/x',
+      REQ_BODY,
+    );
+    let count = 0;
+    const { rest } = buildFakeRest({
+      patch: () => {
+        count++;
+        throw apiErr500;
+      },
+    });
+    const wrapped = wrapRestWithResilience(rest, replaySafeRetryPolicy());
+
+    await expect(
+      wrapped.patch('/channels/1/messages/2', {
+        body: { attachments: [{ id: '0', filename: 'upload.bin' }] },
+        files: [{ key: 'files[0]', name: 'upload.bin', data: Buffer.from('x') }],
+      }),
+    ).rejects.toBe(apiErr500);
+    expect(count).toBe(1);
+  });
+
+  it('still retries a JSON-only PATCH after a 5xx', async () => {
+    const apiErr500 = new DiscordAPIError(
+      { code: 0, message: 'upstream' },
+      0,
+      503,
+      'PATCH',
+      'https://discord.com/api/v10/x',
+      REQ_BODY,
+    );
+    let count = 0;
+    const { rest } = buildFakeRest({
+      patch: () => {
+        count++;
+        if (count === 1) throw apiErr500;
+        return { ok: true };
+      },
+    });
+    const wrapped = wrapRestWithResilience(rest, replaySafeRetryPolicy());
+
+    await expect(
+      wrapped.patch('/channels/1/messages/2', { body: { content: 'edit' } }),
+    ).resolves.toEqual({
+      ok: true,
+    });
     expect(count).toBe(2);
   });
 

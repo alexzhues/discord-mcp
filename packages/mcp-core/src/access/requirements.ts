@@ -14,6 +14,7 @@ export const DISCORD_PERMISSION_NAMES = [
   'VIEW_CHANNEL',
   'CREATE_INSTANT_INVITE',
   'SEND_MESSAGES',
+  'SEND_TTS_MESSAGES',
   'SEND_MESSAGES_IN_THREADS',
   'READ_MESSAGE_HISTORY',
   'ADD_REACTIONS',
@@ -59,6 +60,7 @@ export const DISCORD_PERMISSION_BITS: Readonly<Record<DiscordPermissionName, big
   VIEW_CHANNEL: PermissionFlagsBits.ViewChannel,
   CREATE_INSTANT_INVITE: PermissionFlagsBits.CreateInstantInvite,
   SEND_MESSAGES: PermissionFlagsBits.SendMessages,
+  SEND_TTS_MESSAGES: PermissionFlagsBits.SendTTSMessages,
   SEND_MESSAGES_IN_THREADS: PermissionFlagsBits.SendMessagesInThreads,
   READ_MESSAGE_HISTORY: PermissionFlagsBits.ReadMessageHistory,
   ADD_REACTIONS: PermissionFlagsBits.AddReactions,
@@ -175,6 +177,26 @@ export const CHANNEL_WRITE_ACCESS = {
   scope: 'channel',
   hierarchy: 'not_applicable',
 } as const satisfies DiscordAccessRequirement;
+
+export const COMPOSER_PUBLISH_ACCESS = {
+  ...CHANNEL_WRITE_ACCESS,
+  permissions: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY'],
+  conditions: [
+    { fields: ['embeds'], permissions: ['EMBED_LINKS'] },
+    { fields: ['files'], permissions: ['ATTACH_FILES'] },
+    { fields: ['poll'], permissions: ['SEND_POLLS'] },
+    { fields: ['tts'], permissions: ['SEND_TTS_MESSAGES'], when: { tts: true } },
+  ],
+} as const satisfies DiscordAccessRequirement;
+
+export const COMPOSER_UPDATE_ACCESS = {
+  ...COMPOSER_PUBLISH_ACCESS,
+  conditions: COMPOSER_PUBLISH_ACCESS.conditions.filter(
+    (condition) =>
+      !(condition.fields as readonly string[]).includes('poll') &&
+      !(condition.fields as readonly string[]).includes('tts'),
+  ),
+} satisfies DiscordAccessRequirement;
 
 /** Operations that never contact Discord (builders, validators, and planners). */
 export const LOCAL_ACCESS = {
@@ -507,6 +529,9 @@ const TOOL_REQUIREMENTS: Readonly<Record<string, DiscordAccessRequirement>> = {
   messages_bulk_delete: channel(['MANAGE_MESSAGES']),
   messages_delete: channel(['MANAGE_MESSAGES']),
   messages_send: channel(['VIEW_CHANNEL', 'SEND_MESSAGES']),
+  messages_compose: LOCAL_ACCESS,
+  messages_publish: COMPOSER_PUBLISH_ACCESS,
+  messages_update: COMPOSER_UPDATE_ACCESS,
   messages_pin: channel(['PIN_MESSAGES']),
   messages_unpin: channel(['PIN_MESSAGES']),
   messages_get: messageRead,

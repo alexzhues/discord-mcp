@@ -60,6 +60,12 @@ const SENSITIVE_KEYS_BY_TOOL: Record<string, ReadonlySet<string>> = {
   app_emojis_create: new Set(['image']),
   messages_send: new Set(['content']),
   messages_edit: new Set(['content']),
+  // Composer payloads may contain base64 data URIs and untrusted rich
+  // message content. Drop the whole values from audit records; truncating a
+  // data URI would still persist caller-owned bytes.
+  messages_compose: new Set(['content', 'embeds', 'components', 'poll', 'files']),
+  messages_publish: new Set(['content', 'embeds', 'components', 'poll', 'files']),
+  messages_update: new Set(['content', 'embeds', 'components', 'poll', 'files']),
   // length only, no IDs leaked - the redactor will replace the array
   // with `[REDACTED:${arr.length}ch]`-style marker via the value path.
   messages_bulk_delete: new Set(['message_ids']),

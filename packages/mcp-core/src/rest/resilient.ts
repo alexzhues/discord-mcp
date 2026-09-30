@@ -11,7 +11,7 @@ import { classifyDiscordError, DiscordRetryableError } from './errors.js';
  */
 export type ClassifierFn = (
   err: unknown,
-  opts?: { method?: string },
+  opts?: { method?: string; hasFiles?: boolean },
 ) => DiscordRetryableError | null;
 
 /** Options passed to {@link wrapRestWithResilience}. */
@@ -104,7 +104,13 @@ export function wrapRestWithResilience(
         try {
           return await original(...withPolicySignal(args, signal));
         } catch (err) {
-          const retryable = classifier(err, { method: verb });
+          const requestData = args[1];
+          const hasFiles =
+            requestData !== null &&
+            typeof requestData === 'object' &&
+            Array.isArray((requestData as RequestData).files) &&
+            (requestData as RequestData).files!.length > 0;
+          const retryable = classifier(err, { method: verb, hasFiles });
           if (retryable !== null) {
             throw retryable;
           }

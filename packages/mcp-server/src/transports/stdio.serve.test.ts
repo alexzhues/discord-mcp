@@ -117,7 +117,7 @@ describe('serveStdio protocol bridge', () => {
           expect.objectContaining({ name: 'messages_send' }),
         ]),
       });
-      expect((await client.listTools()).tools).toHaveLength(218);
+      expect((await client.listTools()).tools).toHaveLength(221);
     } finally {
       await client.close();
     }
