@@ -1,6 +1,6 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { __SENSITIVE_KEYS_BY_TOOL_FOR_TESTS, redactArgs } from './redact.js';
 
@@ -487,34 +487,30 @@ describe('redactArgs vs. the live tool registry', () => {
       .filter((e) => e.isDirectory() && !e.name.startsWith('_'))
       .map((e) => e.name);
 
-    const categoryResults = await Promise.all(
-      categories.map(async (category) => {
-        const dir = join(TOOLS_DIR, category);
-        const files = readdirSync(dir).filter(
-          (f) =>
-            f.endsWith('.ts') &&
-            !f.endsWith('.test.ts') &&
-            !f.endsWith('.bench.ts') &&
-            !f.startsWith('_'),
+    for (const category of categories) {
+      const dir = join(TOOLS_DIR, category);
+      const files = readdirSync(dir).filter(
+        (f) =>
+          f.endsWith('.ts') &&
+          !f.endsWith('.test.ts') &&
+          !f.endsWith('.bench.ts') &&
+          !f.startsWith('_'),
+      );
+      for (const file of files) {
+        const mod = await import(pathToFileURL(join(dir, file)).href);
+        const meta = (
+          mod.default as
+            | { __toolMetadata?: { name: string; inputSchema: Record<string, unknown> } }
+            | undefined
+        )?.__toolMetadata;
+        if (meta === undefined) continue;
+        credentialArgs.push(
+          ...Object.keys(meta.inputSchema)
+            .filter((key) => CREDENTIAL_KEY_RE.test(key))
+            .map((key) => ({ tool: meta.name, key })),
         );
-        const fileResults = await Promise.all(
-          files.map(async (file) => {
-            const mod = await import(`file://${join(dir, file).replace(/\\/g, '/')}`);
-            const meta = (
-              mod.default as
-                | { __toolMetadata?: { name: string; inputSchema: Record<string, unknown> } }
-                | undefined
-            )?.__toolMetadata;
-            if (meta === undefined) return [];
-            return Object.keys(meta.inputSchema)
-              .filter((key) => CREDENTIAL_KEY_RE.test(key))
-              .map((key) => ({ tool: meta.name, key }));
-          }),
-        );
-        return fileResults.flat();
-      }),
-    );
-    credentialArgs.push(...categoryResults.flat());
+      }
+    }
   });
 
   it('redacts every credential-shaped arg name in the registry', () => {

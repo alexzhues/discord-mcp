@@ -1,9 +1,12 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { z } from 'zod';
 import type { Config } from '../../../config.js';
-import { resolveBlueprintStateDirectory } from './blueprint.state-path.js';
+import {
+  resolveBlueprintPlanPath,
+  resolveBlueprintStateDirectory,
+  resolveBlueprintStatePath,
+} from './blueprint.state-path.js';
 import { blueprintSigningSecret } from './blueprint.trust.js';
 import { canonicalJson } from './blueprint.validation.js';
 
@@ -184,7 +187,7 @@ export async function saveGuildChangePlan(plan: GuildChangePlan, config: Config)
   const { directory, secret } = getGuildChangeContext(config);
   const ref = refForPlan(plan.plan_id, secret);
   await mkdir(directory, { recursive: true });
-  const path = join(directory, `${ref.slice(5)}.json`);
+  const path = resolveBlueprintPlanPath(directory, ref, '.json');
   const envelope = {
     schema_version: 'guild_change_plan_envelope.v1',
     reference: ref,
@@ -203,7 +206,9 @@ export async function loadGuildChangePlan(
 ): Promise<GuildChangePlan> {
   if (!PLAN_RE.test(planRef)) throw new Error('Invalid guild change plan reference.');
   const { directory, secret } = getGuildChangeContext(config);
-  const raw = JSON.parse(await readFile(join(directory, `${planRef.slice(5)}.json`), 'utf8')) as {
+  const raw = JSON.parse(
+    await readFile(resolveBlueprintPlanPath(directory, planRef, '.json'), 'utf8'),
+  ) as {
     reference: string;
     plan: GuildChangePlan;
     auth_tag: string;
@@ -225,7 +230,7 @@ export async function loadGuildChangeCheckpoint(
   const { directory, secret } = getGuildChangeContext(config);
   try {
     const envelope = JSON.parse(
-      await readFile(join(directory, `${planRef.slice(5)}.checkpoint.json`), 'utf8'),
+      await readFile(resolveBlueprintPlanPath(directory, planRef, '.checkpoint.json'), 'utf8'),
     ) as { state: GuildChangeCheckpoint; auth_tag: string };
     if (!hmacEqual(envelope.auth_tag, checkpointAuth(planRef, envelope.state, secret)))
       throw new Error('Guild change checkpoint proof is invalid.');
@@ -243,7 +248,7 @@ export async function saveGuildChangeCheckpoint(
 ): Promise<void> {
   const { directory, secret } = getGuildChangeContext(config);
   await mkdir(directory, { recursive: true });
-  const path = join(directory, `${planRef.slice(5)}.checkpoint.json`);
+  const path = resolveBlueprintPlanPath(directory, planRef, '.checkpoint.json');
   const tmp = `${path}.tmp-${process.pid}`;
   const persisted = { ...state, mode: state.mode ?? 'apply' } as GuildChangeCheckpoint;
   await writeFile(
@@ -260,11 +265,12 @@ export async function acquireGuildChangeLock(
 ): Promise<() => Promise<void>> {
   const { directory } = getGuildChangeContext(config);
   await mkdir(directory, { recursive: true });
-  const lock = join(directory, `${planRef.slice(5)}.lock`);
+  const lock = resolveBlueprintPlanPath(directory, planRef, '.lock');
+  const ownerPath = resolveBlueprintStatePath(lock, 'owner.json');
   const claim = async () => {
     await mkdir(lock);
     try {
-      await writeFile(join(lock, 'owner.json'), JSON.stringify({ pid: process.pid }), {
+      await writeFile(ownerPath, JSON.stringify({ pid: process.pid }), {
         mode: 0o600,
       });
     } catch (error) {
@@ -278,9 +284,13 @@ export async function acquireGuildChangeLock(
     if ((initialError as NodeJS.ErrnoException).code !== 'EEXIST') throw initialError;
     let recovery: Awaited<ReturnType<typeof open>> | undefined;
     try {
-      recovery = await open(`${lock}.recover`, 'wx', 0o600);
+      recovery = await open(
+        resolveBlueprintPlanPath(directory, planRef, '.lock.recover'),
+        'wx',
+        0o600,
+      );
       await recovery.writeFile(`${process.pid}\n`);
-      const owner = JSON.parse(await readFile(join(lock, 'owner.json'), 'utf8')) as {
+      const owner = JSON.parse(await readFile(ownerPath, 'utf8')) as {
         pid?: number;
       };
       if (!Number.isInteger(owner.pid) || (owner.pid ?? 0) <= 0) throw new Error('missing owner');
@@ -297,7 +307,7 @@ export async function acquireGuildChangeLock(
     } finally {
       if (recovery !== undefined) {
         await recovery.close();
-        await rm(`${lock}.recover`, { force: true });
+        await rm(resolveBlueprintPlanPath(directory, planRef, '.lock.recover'), { force: true });
       }
     }
   }

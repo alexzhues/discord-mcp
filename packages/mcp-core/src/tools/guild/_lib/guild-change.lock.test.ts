@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../../../config.js';
+import { resolveBlueprintStatePath } from './blueprint.state-path.js';
 import { acquireGuildChangeLock, getGuildChangeContext } from './guild-change.js';
 
 describe('guild change lock recovery', () => {
@@ -18,7 +19,10 @@ describe('guild change lock recovery', () => {
     const directory = getGuildChangeContext(config).directory;
     const lock = join(directory, `${planRef.slice(5)}.lock`);
     await mkdir(lock, { recursive: true });
-    await writeFile(join(lock, 'owner.json'), JSON.stringify({ pid: 99999999 }));
+    await writeFile(
+      resolveBlueprintStatePath(lock, 'owner.json'),
+      JSON.stringify({ pid: 99999999 }),
+    );
     const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
       const error = new Error('dead') as NodeJS.ErrnoException;
       error.code = 'ESRCH';

@@ -53,30 +53,28 @@ beforeAll(async () => {
     .filter((e) => e.isDirectory() && !e.name.startsWith('_'))
     .map((e) => e.name);
 
-  const imported = await Promise.all(
-    categories.flatMap((category) => {
-      const dir = join(TOOLS_DIR, category);
-      const files = readdirSync(dir)
-        .filter(
-          (f) =>
-            f.endsWith('.ts') &&
-            !f.endsWith('.test.ts') &&
-            !f.endsWith('.bench.ts') &&
-            !f.startsWith('_'),
-        )
-        .sort();
-      return files.map(async (file) => {
-        const sourcePath = join(dir, file);
-        const mod = await import(pathToFileURL(sourcePath).href);
-        const meta = (mod.default as { __toolMetadata?: ToolMeta } | undefined)?.__toolMetadata;
-        return meta === undefined
-          ? undefined
-          : { ...meta, preconditions: meta.preconditions ?? [], sourcePath };
-      });
-    }),
-  );
-  tools = imported.filter((tool): tool is ToolMeta => tool !== undefined);
-  tools = tools.sort((a, b) => a.name.localeCompare(b.name));
+  const imported: ToolMeta[] = [];
+  for (const category of categories) {
+    const dir = join(TOOLS_DIR, category);
+    const files = readdirSync(dir)
+      .filter(
+        (f) =>
+          f.endsWith('.ts') &&
+          !f.endsWith('.test.ts') &&
+          !f.endsWith('.bench.ts') &&
+          !f.startsWith('_'),
+      )
+      .sort();
+    for (const file of files) {
+      const sourcePath = join(dir, file);
+      const mod = await import(pathToFileURL(sourcePath).href);
+      const meta = (mod.default as { __toolMetadata?: ToolMeta } | undefined)?.__toolMetadata;
+      if (meta !== undefined) {
+        imported.push({ ...meta, preconditions: meta.preconditions ?? [], sourcePath });
+      }
+    }
+  }
+  tools = imported.sort((a, b) => a.name.localeCompare(b.name));
 });
 
 describe('tool registry invariants', () => {

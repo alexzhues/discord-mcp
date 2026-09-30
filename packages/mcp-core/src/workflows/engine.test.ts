@@ -681,6 +681,63 @@ describe('WorkflowEngine', () => {
     }
   });
 
+  it('records the cancellation message when an invocation throws AbortError', async () => {
+    const f = await fixture();
+    let startedId = '';
+    try {
+      const aborted = Object.assign(new Error('aborted'), { name: 'AbortError' });
+      const invoke = vi.fn().mockRejectedValue(aborted);
+      const started = await f.engine.start(
+        { target, steps: [{ tool: 'messages_send', args: {} }] },
+        context(invoke),
+      );
+      startedId = started.id;
+      await vi.waitFor(
+        async () => expect((await f.store.get(started.id))?.status).toBe('needs_review'),
+        { timeout: 5000, interval: 10 },
+      );
+      expect((await f.store.get(started.id))?.failure?.message).toBe('Invocation cancelled.');
+      expect(invoke).toHaveBeenCalledOnce();
+    } finally {
+      await waitForLockRelease(f.store, startedId);
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it('requires review when resuming a failed step that is not retry-safe', async () => {
+    const f = await fixture();
+    let startedId = '';
+    const invoke = vi.fn().mockResolvedValue({
+      isError: true,
+      content: [{ type: 'text', text: 'invalid' }],
+      structuredContent: { code: 'VALIDATION_ERROR' },
+    } satisfies CallToolResult);
+    const engine = new WorkflowEngine({
+      store: f.store,
+      resolvePolicy: () => ({ idempotent: false, retry_safe: false }),
+    });
+    try {
+      const started = await engine.start(
+        { target, steps: [{ tool: 'messages_send', args: {} }] },
+        context(invoke),
+      );
+      startedId = started.id;
+      await vi.waitFor(async () => expect((await f.store.get(started.id))?.status).toBe('failed'), {
+        timeout: 5000,
+        interval: 10,
+      });
+      await waitForLockRelease(f.store, started.id);
+      expect((await engine.resume(started.id, target, context(invoke))).status).toBe(
+        'needs_review',
+      );
+      expect((await f.store.get(started.id))?.failure?.code).toBe('WORKFLOW_RETRY_REQUIRES_REVIEW');
+      expect(invoke).toHaveBeenCalledOnce();
+    } finally {
+      await waitForLockRelease(f.store, startedId);
+      await rm(f.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
   it.each([
     {
       name: 'a persisted bot target drift',
