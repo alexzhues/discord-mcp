@@ -18,6 +18,11 @@ const countOrUnknown = (value: unknown) =>
   typeof value === 'number' && Number.isFinite(value) ? value : '—';
 
 function render(data: PreviewData) {
+  if (data.scope && Array.isArray(data.messages)) return renderContext(data);
+  if (typeof data.id === 'string' && data.id.startsWith('wf_')) return renderWorkflow(data);
+  if (Array.isArray(data.operations) && !data.blueprint && 'snapshot_id' in data)
+    return renderChanges(data);
+  if (Array.isArray(data.channels) && typeof data.user_id === 'string') return renderAccess(data);
   const blueprint = data.blueprint ?? {};
   const hasBlueprint = typeof blueprint.schema_version === 'string';
   const guild = blueprint.guild ?? {};
@@ -69,6 +74,95 @@ function render(data: PreviewData) {
         button.textContent = error instanceof Error ? error.message : 'Review request failed';
       }
     };
+}
+
+function reviewButton(id: string, label: string, message: string) {
+  const button = document.getElementById(id) as HTMLButtonElement | null;
+  if (!button) return;
+  button.onclick = async () => {
+    button.disabled = true;
+    try {
+      const result = await app.sendMessage({
+        role: 'user',
+        content: [{ type: 'text', text: message }],
+      });
+      if (result.isError) throw new Error('Host rejected the request.');
+      button.textContent = 'Requested';
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = error instanceof Error ? error.message : label;
+    }
+  };
+}
+
+function renderChanges(data: PreviewData) {
+  const ready =
+    data.status === 'ready' && !data.blockers?.length && typeof data.plan_id === 'string';
+  root.innerHTML = `<h1>Existing server changes</h1><p class="pill">${text(data.status)}</p>
+    <p>Plan: <code>${text(data.plan_id)}</code></p>
+    ${(data.operations || []).map((operation: PreviewData, index: number) => `<section class="card"><h2>${index + 1}. ${text(operation.kind)} · ${text(operation.resource_id)}</h2><div class="grid"><div><b>Before</b><pre>${text(JSON.stringify(operation.changed?.before ?? operation.before, null, 2))}</pre></div><div><b>After</b><pre>${text(JSON.stringify(operation.changed?.after ?? operation.after, null, 2))}</pre></div></div></section>`).join('')}
+    <section class="card"><h2>Blockers</h2>${list(data.blockers || [])}<h2>Permission and configuration risks</h2>${list(data.risks || [])}</section>
+    <p>Review the changes and member access report before applying.</p><button id="review-changes" ${ready ? '' : 'disabled'}>Request change review</button>`;
+  if (ready)
+    reviewButton(
+      'review-changes',
+      'Request change review',
+      `Please review this exact existing-server change plan and request explicit approval before applying: ${data.plan_id}.`,
+    );
+}
+
+function renderContext(data: PreviewData) {
+  const coverage = data.coverage || {};
+  root.innerHTML = `<h1>Conversation context</h1><p>Channel: <code>${text(data.scope.channel_id)}</code> · ${text(data.scope.scope)}</p>
+    <p>${text(data.returned_count)} messages returned · ${text(data.scanned_count)} scanned · ${text(data.pages_scanned)} pages</p>
+    <section class="card"><h2>Coverage</h2><p>${coverage.partial ? 'Partial context' : 'Bounded context'} · ${text(coverage.direction)}</p>${list(coverage.reasons || [])}<p>Next cursor: <code>${text(data.next_cursor || 'none')}</code></p></section>
+    ${(data.messages || [])
+      .map((message: PreviewData) => {
+        const url = message.citation?.jump_url;
+        const valid =
+          typeof url === 'string' &&
+          /^https:\/\/discord\.com\/channels\/(?:\d{17,20}|@me)\/\d{17,20}\/\d{17,20}$/.test(url);
+        return `<article class="card"><h2>${text(message.author_name || message.author?.username || message.id)}</h2><p>${text(message.timestamp)}</p><pre>${text(message.content || '[No text content exposed]')}</pre>${message.reply_reference ? `<p>Reply: ${text(message.reply_reference.content || message.reply_reference.reason || message.reply_reference.message_id)}</p>` : ''}${valid ? `<a href="${text(url)}" target="_blank" rel="noopener noreferrer">Open source message</a>` : '<p class="muted">Source URL unavailable</p>'}</article>`;
+      })
+      .join('')}`;
+}
+
+function renderWorkflow(data: PreviewData) {
+  root.innerHTML = `<h1>Background workflow</h1><p class="pill">${text(data.status)}</p><p>Operation: <code>${text(data.id)}</code></p>
+    <section class="card"><h2>Progress</h2><p>${text(data.completed_steps)} / ${text(data.total_steps)} steps completed</p><progress max="${Number(data.total_steps) || 1}" value="${Number(data.completed_steps) || 0}"></progress><p>Updated: ${text(data.updated_at)}</p>${data.failure ? list([data.failure.code, data.failure.message]) : ''}</section>
+    <button id="refresh-workflow">Refresh progress</button> <button id="resume-workflow">Request resume review</button> <button id="cancel-workflow">Request cancellation</button><p id="workflow-error" class="blocked"></p>`;
+  reviewButton(
+    'resume-workflow',
+    'Request resume review',
+    `Review the checkpoint and resume workflow ${data.id} only if its previous outcomes and original approvals permit it.`,
+  );
+  reviewButton(
+    'cancel-workflow',
+    'Request cancellation',
+    `Cancel workflow ${data.id}. Report which steps completed; cancellation does not undo their effects.`,
+  );
+  const refresh = document.getElementById('refresh-workflow') as HTMLButtonElement;
+  refresh.onclick = async () => {
+    refresh.disabled = true;
+    try {
+      const result = await app.callServerTool({
+        name: 'workflow_status',
+        arguments: { id: data.id, target: data.target },
+      });
+      if (result.isError || !result.structuredContent)
+        throw new Error('Could not refresh workflow progress.');
+      render(result.structuredContent as PreviewData);
+    } catch (error) {
+      document.getElementById('workflow-error')!.textContent =
+        error instanceof Error ? error.message : 'Refresh failed';
+      refresh.disabled = false;
+    }
+  };
+}
+
+function renderAccess(data: PreviewData) {
+  root.innerHTML = `<h1>Member access report</h1><p>Member: <code>${text(data.user_id)}</code> · Guild: <code>${text(data.guild_id)}</code></p><p>${data.complete ? 'Complete selected channel coverage' : 'Partial coverage'}</p>${list(data.warnings || [])}
+    ${(data.channels || []).map((channel: PreviewData) => `<section class="card"><h2>${text(channel.name || channel.channel_id)}</h2><p>View: ${text(channel.view)} · Send: ${text(channel.send)} · Manage: ${text(channel.manage)}</p><p>${text(channel.reason)}</p></section>`).join('')}`;
 }
 
 app.ontoolresult = (result) => {

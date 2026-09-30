@@ -9,9 +9,20 @@ This page records user-visible changes for each tagged release. For the exact
 commit history and downloadable artifacts, see
 [GitHub releases](https://github.com/cappyeo/discord-mcp/releases).
 
-## Unreleased
+## v0.31.0 - Existing server changes, sourced context, and durable workflows
 
-- No unreleased changes.
+Released 2026-10-01.
+
+- Added existing-server change plans, approved apply/resume, selective configuration
+  restoration, and bounded member access reports. Changes retain resource IDs and
+  omit creates/deletes.
+- Added `messages_context` for bounded channel, thread, and forum-post history with
+  reply references, Discord source links, coverage, and resumable cursors.
+- Added four durable workflow tools for asynchronous execution, status, resume,
+  and cancellation with authenticated private checkpoints and normal policy gates.
+- Extended the MCP Apps preview with before/after changes, member access, source
+  messages, and read-only workflow progress refresh. Plain text and structured
+  results remain available to clients without an Apps renderer.
 
 ## v0.30.0 - MCP protocol modernization and blueprint preview
 

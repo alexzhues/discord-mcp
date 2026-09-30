@@ -22,6 +22,8 @@ const channelId = '111122223333444455';
 const messageId = '111122223333444466';
 const simpleComponents = [{ type: 10, content: 'hello' }];
 type PayloadToolName =
+  | 'guild_change_apply'
+  | 'guild_change_restore'
   | 'components_v2_send'
   | 'components_v2_edit'
   | 'components_v2_send_from_template';
@@ -45,6 +47,48 @@ function context(
 }
 
 describe('assessComponentsV2Payload', () => {
+  it('previews and approves exact guild changes without requiring Components V2', async () => {
+    const args = {
+      guild_id: channelId,
+      expected_bot_id: messageId,
+      plan_ref: 'gcp1.' + 'a'.repeat(64),
+      approval_id: 'sha256:' + 'b'.repeat(64),
+    };
+    const ledger = new PayloadApprovalLedger();
+    const middleware = payloadConfirmationMiddleware({ env: { MCP_DRY_RUN: 'false' }, ledger });
+    const next = vi.fn().mockResolvedValue({ ok: true });
+    let preview: PayloadConfirmationRequired | undefined;
+    try {
+      await middleware.onCallTool!(context('guild_change_apply', args), next);
+    } catch (error) {
+      preview = error as PayloadConfirmationRequired;
+    }
+    expect(preview).toBeInstanceOf(PayloadConfirmationRequired);
+    expect(next).not.toHaveBeenCalled();
+    const confirmed = {
+      ...args,
+      __confirm: true,
+      __confirm_hash: preview!.payloadHash,
+      __confirm_id: preview!.approvalId,
+    };
+    await middleware.onCallTool!(context('guild_change_apply', args, confirmed), next);
+    expect(next).toHaveBeenCalledOnce();
+    await expect(
+      middleware.onCallTool!(context('guild_change_apply', args, confirmed), next),
+    ).rejects.toBeInstanceOf(PayloadConfirmationApprovalReplayed);
+    await expect(
+      middleware.onCallTool!(
+        context('guild_change_restore', { ...args, operation_indexes: [0] }, confirmed),
+        next,
+      ),
+    ).rejects.toBeInstanceOf(PayloadConfirmationMismatch);
+    await expect(
+      middleware.onCallTool!(
+        context('guild_change_apply', { ...args, guild_id: messageId }, confirmed),
+        next,
+      ),
+    ).rejects.toBeInstanceOf(PayloadConfirmationMismatch);
+  });
   it('recognizes custom IDs and media URLs without returning their private values', () => {
     const components = [
       { type: 2, custom_id: 'private-action' },

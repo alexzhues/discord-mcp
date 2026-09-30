@@ -4,7 +4,7 @@
  * Reads the static `__toolMetadata` attached to every class returned by
  * `defineTool()` (see packages/mcp-core/src/tools/_lib/defineTool.ts) via
  * dynamic `import()` of each tool source file. Renders one MDX page per
- * tool, one index per category, and a top-level tools index - 209 + 31 + 1
+ * tool, one index per category, and a top-level tools index - 218 + 31 + 1
  * pages total.
  *
  * Run via `pnpm --filter site generate-tools`. Requires `tsx` to register
@@ -120,7 +120,7 @@ export async function loadAllTools(toolsDir: string = TOOLS_DIR): Promise<ToolMe
 
 /**
  * Tool descriptions follow the established 4-section format used across the
- * 209 tools. Headings are bold-asterisk markdown - capture body text up to
+ * 218 tools. Headings are bold-asterisk markdown - capture body text up to
  * the next bold-asterisk heading or end of string.
  */
 export function parseDescription(desc: string): {
@@ -532,6 +532,71 @@ export function buildSchemaExample(
 
   if (options.toolName === 'mcp_pipeline' && fields.steps) {
     example.steps = [{ id: 'me', tool: 'users_get_current', args: {} }];
+  }
+
+  const workflowId = 'wf_0123456789abcdef0123456789abcdef';
+  const workflowTarget = {
+    profile_id: 'devbot',
+    bot_id: '123456789012345678',
+    guild_id: '123456789012345679',
+    channel_id: '123456789012345680',
+  };
+  if (options.toolName === 'workflow_start' && fields.target && fields.steps) {
+    example.target = workflowTarget;
+    example.steps = [
+      { id: 'inspect', tool: 'guild_get', args: { guild_id: workflowTarget.guild_id } },
+    ];
+  }
+  if (
+    ['workflow_cancel', 'workflow_resume', 'workflow_status'].includes(options.toolName ?? '') &&
+    fields.id &&
+    fields.target
+  ) {
+    example.id = workflowId;
+    example.target = workflowTarget;
+  }
+  if (options.toolName === 'messages_context' && fields.channel_id) {
+    example.channel_id = '123456789012345680';
+    example.limit = 20;
+    example.pages = 1;
+  }
+  if (
+    options.toolName === 'permissions_member_access_report' &&
+    fields.guild_id &&
+    fields.user_id
+  ) {
+    example.guild_id = '123456789012345679';
+    example.user_id = '123456789012345678';
+    example.channel_ids = ['123456789012345680'];
+  }
+  if (
+    options.toolName === 'guild_change_plan' &&
+    fields.guild_id &&
+    fields.expected_bot_id &&
+    fields.request &&
+    fields.changes
+  ) {
+    example.guild_id = workflowTarget.guild_id;
+    example.expected_bot_id = workflowTarget.bot_id;
+    example.request = 'Rename one existing channel';
+    example.changes = {
+      channels: [{ id: workflowTarget.channel_id, patch: { name: 'support' } }],
+      roles: [],
+      permission_overwrites: [],
+    };
+  }
+  if (
+    ['guild_change_apply', 'guild_change_restore'].includes(options.toolName ?? '') &&
+    fields.guild_id &&
+    fields.expected_bot_id &&
+    fields.plan_ref &&
+    fields.approval_id
+  ) {
+    example.guild_id = workflowTarget.guild_id;
+    example.expected_bot_id = workflowTarget.bot_id;
+    example.plan_ref = `gcp1.${'f'.repeat(64)}`;
+    example.approval_id = `sha256:${'a'.repeat(64)}`;
+    if (options.toolName === 'guild_change_restore') example.operation_indexes = [0];
   }
 
   if (options.toolName === 'onboarding_modify' && Array.isArray(example.prompts)) {

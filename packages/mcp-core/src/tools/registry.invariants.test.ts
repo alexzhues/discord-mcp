@@ -1,5 +1,5 @@
 /**
- * Registry-wide invariants over all 209 tools.
+ * Registry-wide invariants over all 218 tools.
  *
  * These are the checks that per-tool test files structurally cannot make: a
  * tool that forgets its confirm gate, mislabels itself as read-only, or
@@ -75,7 +75,7 @@ beforeAll(async () => {
 
 describe('tool registry invariants', () => {
   it('discovers the full advertised tool surface', () => {
-    expect(tools.length).toBe(209);
+    expect(tools.length).toBe(218);
     expect(new Set(tools.map((t) => t.name)).size).toBe(tools.length);
     expect(new Set(tools.map((t) => t.category)).size).toBe(31);
   });
@@ -165,7 +165,7 @@ describe('tool registry invariants', () => {
     // allowlisted rather than "fixed" - the point of the check is to catch a
     // NEW tool landing under the wrong prefix.
     const PREFIX_EXCEPTIONS: Record<string, readonly string[]> = {
-      meta: ['mcp_', 'discord_'],
+      meta: ['mcp_', 'discord_', 'workflow_'],
       monetization: ['entitlements_', 'skus_', 'subscriptions_'],
     };
     for (const t of tools) {

@@ -1,0 +1,38 @@
+---
+title: Existing server changes
+description: Preview, apply, resume, and selectively restore bounded changes on an existing Discord server.
+sidebar:
+  order: 4
+---
+
+Use `guild_change_plan` when the request is to improve a server that already
+exists. The caller supplies the natural-language request and a typed change set
+for existing channel IDs, role IDs, and permission overwrites. The plan reads a
+live snapshot, preserves IDs and omitted fields, reports the before/after
+operations, and stores an authenticated private `plan_ref`.
+
+Review `plan_id`, `snapshot_id`, `approval_id`, operations, blockers, and risks
+before applying. `guild_change_apply` requires the same guild, bot, plan
+reference, approval ID, `MCP_DRY_RUN=false`, and the normal payload confirmation
+fields. It checks the caller bot identity, rejects external drift per operation,
+checkpoints before and after each write, and reads each changed resource back.
+If a process ends after Discord accepted a write, the next call recognizes the
+expected after-state and does not repeat it.
+
+The change surface is intentionally bounded: it edits existing roles, channels,
+category parent/position, and permission overwrites. It does not create or
+delete resources. Role edits must be below the caller bot's highest role;
+Permission overwrites require `MANAGE_ROLES`; role targets must be an existing
+role or `@everyone`, while member targets use `type: 1`.
+Category moves require an existing category ID.
+
+`guild_change_restore` restores selected operation indexes only after the
+operation was applied and the live resource still equals the expected after
+state. It writes only the fields that the original operation changed and reads
+them back. Unsupported or externally changed resources are reported as blocked;
+this is not a whole-guild rollback guarantee.
+
+For a member's actual perspective, use `permissions_member_access_report` with a bounded
+channel selection. It reports view/send/manage as `allowed`, `denied`, or
+`unknown`, marks missing role data and ambiguous thread inheritance unknown,
+and never treats incomplete Discord payloads as permission to mutate.

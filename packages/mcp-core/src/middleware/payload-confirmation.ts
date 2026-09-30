@@ -443,6 +443,12 @@ function isValidFileRecord(value: unknown): value is FileApprovalRecord {
 }
 
 function canonicalTarget(args: Record<string, unknown>, toolName: string): string {
+  if (toolName === 'guild_change_apply' || toolName === 'guild_change_restore')
+    return JSON.stringify({
+      guild_id: args.guild_id ?? null,
+      expected_bot_id: args.expected_bot_id ?? null,
+      plan_ref: args.plan_ref ?? null,
+    });
   return JSON.stringify({
     channel_id: args.channel_id ?? null,
     ...(toolName === 'components_v2_edit' ? { message_id: args.message_id ?? null } : {}),
@@ -652,7 +658,9 @@ export function payloadConfirmationMiddleware(
       }
 
       const args = isRecord(ctx.args) ? ctx.args : {};
-      const validated = validatedComponents(args, ctx.tool.name);
+      const validated = PAYLOAD_CONFIRMATION_TOOL_NAMES.has(ctx.tool.name)
+        ? validatedComponents(args, ctx.tool.name)
+        : { hashArgs: args, components: [] as readonly unknown[] };
       const assessment = assessComponentsV2Payload(ctx.tool.name, {
         ...args,
         components: validated.components,

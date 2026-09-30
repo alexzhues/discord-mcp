@@ -1,0 +1,18 @@
+---
+title: Durable workflows
+description: Bounded, target-bound asynchronous Discord operations.
+---
+
+Durable workflows are for a bounded sequence of MCP tool calls that may outlive one client request. `workflow_start` writes a private checkpoint and returns an operation ID immediately. `workflow_status`, `workflow_resume`, and `workflow_cancel` address that operation only when the caller supplies the same bot profile and Discord target binding.
+
+Every step is invoked through the server's normal tool middleware. Validation, guild allowlists, category policy, access checks, write mode, approvals, audit, and Discord error handling therefore remain in force. A workflow is not a second execution path around those controls.
+
+The definition is limited to 128 ordered steps. `mcp_pipeline` and all `workflow_*` tools are rejected inside a workflow, so nesting cannot create an unbounded executor tree. The engine does not claim general rollback.
+
+The store is private local state (`0700` directory and `0600` files) with atomic replacement and an exclusive per-operation lock. Checkpoints are written before a step is invoked and after its result is observed. If a process stops while a non-idempotent step is `in_flight`, the next explicit resume marks the operation `needs_review`; it never replays that step automatically because Discord may already have applied it. Only a tool policy that declares both idempotency and safe retry can be retried after explicit resume.
+
+Cancellation is cooperative. It stops the next step and aborts the current invocation when the underlying tool honors its signal. A cancellation around an ambiguous write still needs outcome review.
+
+Status responses intentionally contain only the operation ID, target binding, state, step counts, and safe error code. They do not return stored arguments, Discord payloads, tokens, or step results. Job IDs are random `wf_` references; path-like or forged references are rejected.
+
+The legacy status/resume/cancel tools work on all MCP clients. A future MCP Tasks adapter may add host-native progress, but it is an optional presentation layer over the same durable record and safety rules.

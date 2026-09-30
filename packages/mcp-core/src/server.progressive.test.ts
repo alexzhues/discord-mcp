@@ -71,9 +71,9 @@ describe('progressive tool surface', () => {
     ]);
   });
 
-  it('keeps the full 209-tool surface as the compatibility default', async () => {
+  it('keeps the full 218-tool surface as the compatibility default', async () => {
     const { tools } = await fullClient.listTools();
-    expect(tools).toHaveLength(209);
+    expect(tools).toHaveLength(218);
     expect(tools.map((tool) => tool.name)).not.toContain('mcp_tools_search');
   });
 
@@ -446,7 +446,7 @@ describe('progressive tool surface', () => {
           dispatcher: 'mcp_tools_read',
         }),
       ]),
-      categories: expect.arrayContaining([{ name: 'guild', tool_count: 20 }]),
+      categories: expect.arrayContaining([{ name: 'guild', tool_count: 23 }]),
     });
 
     const read = await progressiveClient.callTool({
@@ -471,7 +471,7 @@ describe('progressive tool surface', () => {
           dispatcher: 'mcp_tools_read',
         }),
       ]),
-      categories: expect.arrayContaining([{ name: 'guild', tool_count: 20 }]),
+      categories: expect.arrayContaining([{ name: 'guild', tool_count: 23 }]),
     });
 
     const read = await progressiveClient.callTool({

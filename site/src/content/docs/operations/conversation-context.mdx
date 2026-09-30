@@ -1,0 +1,26 @@
+---
+title: Cited conversation context
+description: Read bounded Discord channel, thread, and forum context with resumable cursors and citations.
+---
+
+`messages_context` reads a bounded context window from one Discord channel, thread, or forum post. It combines the existing rich message projection with reply references, a channel boundary, coverage metadata, and guild-aware Discord jump URLs.
+
+```json
+{
+  "channel_id": "112233445566778899",
+  "scope": "thread",
+  "limit": 50,
+  "pages": 2,
+  "query": "release"
+}
+```
+
+The result reports `scanned_count`, `returned_count`, `pages_scanned`, `coverage`, and an optional `next_cursor`. Continue with `before` for older history or `after` for newer history. A cursor is a caller-owned continuation value; the server does not persist a conversation index or silently claim to have read the whole channel.
+
+Each returned message includes its original rich fields and a `citation` object. A citation is resolved only when Discord exposes the channel's guild metadata, or when the channel is known to be a DM. If metadata or a reply target is unavailable, the result marks that item unresolved and sets `coverage.partial` with a reason. A caller-supplied `guild_id` is checked against Discord and never used to manufacture a link.
+
+Reply targets are fetched under a small fixed budget. Private or inaccessible replies remain references with `resolved: false`; the server does not infer their content. Forum and thread boundaries are reported from the selected channel metadata when available.
+
+The human-readable result fences Discord-authored text and appends a citation timeline. Treat all Discord content, including structured rich fields and reply text, as untrusted input. This read-only tool does not create approvals, send messages, or perform mutations.
+
+Discord bot REST access does not provide an unbounded server-wide search through this workflow. Use bounded channel or thread cursors, or provide an independently managed index in a later phase with explicit retention and privacy controls.
