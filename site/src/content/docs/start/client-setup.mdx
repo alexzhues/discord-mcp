@@ -1,6 +1,6 @@
 ---
 title: Client setup
-description: Wire up discord-mcp with Claude Desktop, Claude Code, Codex, Antigravity CLI, Cursor Agent CLI, Grok Build CLI, DeepSeek Harness, legacy Gemini CLI, the Cursor editor, or any generic MCP client.
+description: Connect discord-mcp to Claude, Codex, Cursor, VS Code/Copilot, Devin, Windsurf/Cascade, Cline, Roo Code, Continue, Zed, OpenCode, and other MCP clients.
 type: tutorial
 sidebar:
   order: 22
@@ -21,8 +21,14 @@ import TutorialPreCheck from '../../../components/docs/TutorialPreCheck.astro';
 This lesson covers the default **local stdio MCP** setup for clients that can spawn an MCP
 server as a subprocess. The recommended `setup` command verifies one caller-owned bot,
 saves a non-secret local profile, and generates a client-specific configuration fragment.
-Codex and Grok Build receive TOML, DeepSeek Harness receives a YAML patch, and the other clients receive JSON. It prints the fragment
+Codex and Grok Build receive TOML, DeepSeek Harness and Continue receive YAML, and the
+remaining clients receive their host's JSON-shaped fragment. Continue's generated YAML
+uses version `1.0.0`. It prints the fragment
 by default, so you stay in control of the file you merge it into.
+
+The eight new adapters below are available from **v0.29.0**. Guided `setup`
+pins its launcher to that package version. To inspect configurations without
+credentials, run `npx --yes @discord-mcp/cli@0.29.0 init --client <id>`.
 
 If you need remote HTTP, the full direct-tool catalog, or live Gateway notifications, first
 [choose a connection mode](/discord-mcp/operations/clients/). The tutorial below follows the
@@ -40,16 +46,19 @@ recommended local stdio + progressive path.
 `setup` does not edit your client config and has no token flag. The current `DISCORD_TOKEN` is sent only
 to Discord to verify the bot and its guild membership; it is not copied into the generated fragment or
 profile. The Codex fragment forwards `DISCORD_TOKEN` from the environment. Antigravity CLI, Cursor Agent CLI, Grok
-Build CLI, and most JSON-configured clients inherit the client process environment and omit a token field. Gemini CLI instead emits
-the non-secret `${DISCORD_TOKEN}` reference because Gemini removes inherited sensitive variables
-from MCP child processes unless the server entry explicitly opts in. The older
+Build CLI, Devin, Cline, and Roo Code omit a token field and use the client process environment. VS Code and Windsurf/Cascade
+use `${env:DISCORD_TOKEN}`, OpenCode uses `{env:DISCORD_TOKEN}`, Zed inherits the launch
+environment, and Continue uses `${{ secrets.DISCORD_TOKEN }}` with its `.continue/.env` workflow.
+Gemini CLI instead emits the non-secret `${DISCORD_TOKEN}` reference because Gemini removes
+inherited sensitive variables from MCP child processes unless the server entry explicitly opts in. The older
 `init --token` path is for explicit legacy automation and can expose a secret through shell history
 or process inspection.
 </Aside>
 
-Load the token into the terminal that will run setup. Launch command-line clients
-from an environment that still contains the variable; desktop clients may need
-the equivalent user/session environment configured before restart.
+Load the token into the terminal that will run setup. Launch command-line clients from an
+environment that still contains the variable; desktop clients may need the equivalent
+user/session environment configured before restart. Continue IDE users should follow the
+`.continue/.env` instructions in that tab.
 
 ```bash
 read -rsp 'Discord bot token: ' DISCORD_TOKEN && printf '\n'
@@ -216,6 +225,114 @@ $env:DISCORD_TOKEN = Read-Host 'Discord bot token' -MaskInput
   `<project>/.cursor/mcp.json` for one project. Restart Cursor after changing it.
 
   </div>
+  <div slot="vscode">
+
+  ```bash
+  discord-mcp setup --profile devbot --client vscode
+  ```
+
+  In VS Code, open the generated JSON in `<project>/.vscode/mcp.json`, or run
+  **MCP: Open User Configuration** for the user-level file. Merge the generated
+  `discord-mcp` entry under the top-level `servers` object; VS Code uses `type: "stdio"`
+  and the generated `${env:DISCORD_TOKEN}` reference. Keep `DISCORD_TOKEN` in the
+  environment that launches VS Code. See the
+  [official VS Code MCP configuration](https://code.visualstudio.com/docs/agents/reference/mcp-configuration).
+
+  </div>
+  <div slot="windsurf">
+
+  ```bash
+  discord-mcp setup --profile devbot --client windsurf
+  ```
+
+  Windsurf's current Cascade documentation is maintained with Devin. Merge the generated
+  `discord-mcp` entry into the `mcpServers` object in `~/.config/devin/mcp_config.json`
+  (Windows: `%APPDATA%\devin\mcp_config.json`; respect `XDG_CONFIG_HOME` where used),
+  then restart the MCP connection. Cascade supports `${env:VAR_NAME}` references;
+  keep `DISCORD_TOKEN` in the host environment and preserve existing servers. See the
+  [official Cascade MCP guide](https://docs.devin.ai/desktop/cascade/mcp).
+
+  </div>
+  <div slot="cline">
+
+  ```bash
+  discord-mcp setup --profile devbot --client cline
+  ```
+
+  In Cline, open **MCP Servers**, choose the configuration file or workspace entry,
+  and merge the generated server under `mcpServers`. Keep `DISCORD_TOKEN` in the
+  environment used by Cline and restart the MCP connection after saving. See the
+  [official Cline MCP configuration guide](https://docs.cline.bot/mcp/configuring-mcp-servers).
+
+  </div>
+  <div slot="roo-code">
+
+  ```bash
+  discord-mcp setup --profile devbot --client roo-code
+  ```
+
+  In Roo Code, open the MCP settings and merge the generated server under
+  `mcpServers` (Roo Code stores this in its MCP settings file). Preserve existing
+  servers and keep `DISCORD_TOKEN` in the host environment. See the
+  [official Roo Code MCP guide](https://docs.roocode.com/features/mcp/using-mcp-in-roo).
+
+  </div>
+  <div slot="continue">
+
+  ```bash
+  discord-mcp setup --profile devbot --client continue
+  ```
+
+  Save the generated server as `<project>/.continue/mcpServers/discord-mcp.yaml`.
+  Continue's YAML file uses `name`, `version: 1.0.0`, `schema: v1`, and an
+  `mcpServers` list. Keep the launcher command and args from the generated fragment;
+  use `${{ secrets.DISCORD_TOKEN }}` for the `DISCORD_TOKEN` value. For the IDE,
+  put `DISCORD_TOKEN=...` in `%USERPROFILE%/.continue/.env` or
+  `<workspace>/.continue/.env`; the IDE does not inherit shell secrets. Continue CLI
+  can resolve the same reference from its process environment. Reload the IDE after
+  changing configuration. See the [official Continue MCP guide](https://docs.continue.dev/customize/deep-dives/mcp).
+
+  </div>
+  <div slot="zed">
+
+  ```bash
+  discord-mcp setup --profile devbot --client zed
+  ```
+
+  Run **zed: open settings file** and merge the generated entry into Zed's
+  `context_servers` object. Zed uses a flat `context_servers.discord-mcp` entry
+  with a string `command`, an `args` array, and an optional `env` object. Keep
+  `DISCORD_TOKEN` in the launch environment.
+  See the [official Zed MCP guide](https://zed.dev/docs/ai/mcp).
+
+  </div>
+  <div slot="opencode">
+
+  ```bash
+  discord-mcp setup --profile devbot --client opencode
+  ```
+
+  Merge the generated entry into the `mcp` object in `opencode.json`. OpenCode's
+  local server entry uses `type: "local"`, a command array, and an `environment`
+  object; preserve other entries. The generated local entry uses `{env:DISCORD_TOKEN}`
+  and a command array. See the [official OpenCode MCP guide](https://opencode.ai/docs/mcp-servers/).
+
+  </div>
+  <div slot="devin">
+
+  ```bash
+  discord-mcp setup --profile devbot --client devin
+  ```
+
+  Devin Local uses the standard `mcpServers` object. Merge the generated entry into
+  the user config (`~/.config/devin/mcp_config.json`; Windows `%APPDATA%\devin\mcp_config.json`),
+  or into `<project>/.devin/mcp_config.json`. Use `<project>/.devin/mcp_config.local.json`
+  for personal secrets. The generated fragment omits the token field; launch Devin with
+  `DISCORD_TOKEN` set. If the host does not forward it, provide credentials through
+  the private local config as documented by Devin, keeping that file out of version control.
+  Verify with `devin mcp list`. See the [official Devin CLI configuration guide](https://docs.devin.ai/cli/extensibility/mcp/configuration).
+
+  </div>
   <div slot="deepseek-harness">
 
   ```bash
@@ -326,7 +443,7 @@ you do not need to expose the token to a second process yet.
 
 - [ ] I merged the generated `discord-mcp` entry without removing my other MCP servers.
 - [ ] `discord-mcp profile show devbot` reports the intended bot ID and guild allowlist.
-- [ ] The client launch environment supplies `DISCORD_TOKEN`; neither profile nor client config stores it.
+- [ ] My client can resolve `DISCORD_TOKEN` through its launch environment or private secret provider (Continue IDE uses `.continue/.env`); generated fragments and profiles contain no literal token.
 - [ ] I fully restarted the MCP client after changing its configuration.
 - [ ] The client can list the expected progressive or full tool surface without a server startup error.
 

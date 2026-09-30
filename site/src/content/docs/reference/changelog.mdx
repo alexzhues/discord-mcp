@@ -13,6 +13,24 @@ commit history and downloadable artifacts, see
 
 - No unreleased changes.
 
+## v0.29.0 - More MCP clients
+
+Released 2026-09-30.
+
+- Added eight new `setup` and `init` clients: VS Code/GitHub
+  Copilot (`vscode`), Windsurf/Cascade compatibility (`windsurf`), Devin Local
+  (`devin`), Cline (`cline`), Roo Code (`roo-code`), Continue (`continue`),
+  Zed (`zed`), and OpenCode (`opencode`).
+- Generated snippets use each host's native schema and credential references;
+  Continue emits YAML and documents its IDE secret-file requirement. Guided
+  setup keeps verified bot/guild scope and preview mode in the non-secret profile.
+- Client selection, persisted profiles, CLI help, tutorial tabs, and homepage
+  commands include the new clients. The existing five client-specific `doctor`
+  audits remain the supported saved-config audits; other clients use profile
+  diagnostics followed by verification inside the host.
+- These additions are covered by local config/profile tests. They do not
+  establish live model-to-Discord acceptance in each host.
+
 ## v0.28.0 - forum tag preservation and safe edits
 
 - Channel reads and creation results now preserve forum/media `available_tags`

@@ -397,14 +397,14 @@ describe('generated reference stays aligned with tool metadata', () => {
 });
 
 describe('handwritten docs do not regress to known stale contracts', () => {
-  it('keeps the Reference changelog card aligned with the published CLI version', () => {
+  it('keeps the Reference changelog card aligned with the source CLI version', () => {
     const cliPackage = JSON.parse(
       readFileSync(join(ROOT, 'packages/mcp-server/package.json'), 'utf8'),
     ) as { version: string };
     const referenceIndex = readFileSync(REFERENCE_INDEX_MDX, 'utf8');
 
     expect(referenceIndex).toContain(
-      `One section per release v0.0.0 → v${cliPackage.version}, with dates and user-visible changes.`,
+      `Release history through v${cliPackage.version}, with dates and user-visible changes.`,
     );
   });
 
