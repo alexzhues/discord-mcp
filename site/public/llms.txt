@@ -1,6 +1,6 @@
 # discord-mcp
 
-> Connect any MCP-compatible AI to Discord through a caller-owned bot. discord-mcp provides typed community operations, explicit safety boundaries, and independently verifiable guild builds without a hosted bot relay.
+> Discord MCP by cappyeo is an open-source Model Context Protocol (MCP) server for Discord. Connect Claude, Codex, Cursor, and other MCP-compatible AI clients to your own Discord bot for messaging, moderation, channels, roles, and verifiable guild builds.
 
 ## Canonical sources
 
@@ -16,6 +16,7 @@
 
 ## Product facts
 
+- Project identity: `cappyeo/discord-mcp`, maintained by `cappyeo`; not an official Discord product or the Model Context Protocol community Discord server.
 - Public npm packages: `@discord-mcp/cli` and `@discord-mcp/core`.
 - Local stdio transport for MCP-compatible clients, including Claude Desktop, Claude Code, Cursor, and generic clients.
 - Bearer-protected Streamable HTTP transport for remote MCP hosts, with one deployment credential treated as one caller principal.

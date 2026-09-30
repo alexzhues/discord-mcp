@@ -1,10 +1,10 @@
 ---
-title: Connect your AI to Discord
-description: Do real Discord community work through a caller-owned bot, with typed operations, explicit safety boundaries, and verifiable guild outcomes.
+title: Discord MCP Server
+description: Open-source Discord MCP server by cappyeo. Connect Claude, Codex, Cursor and other AI clients to your own bot with 209 tools and safety controls.
 type: landing
 template: splash
 hero:
-  tagline: Do real community work safely through a caller-owned bot. Plan high-risk guild changes, approve the exact target, and verify complete builds against Discord.
+  tagline: A Model Context Protocol server for real Discord community work through a caller-owned bot. Plan high-risk guild changes, approve the exact target, and verify complete builds against Discord.
   actions:
     - text: Get a verified result
       link: /discord-mcp/start/activity-evidence/
@@ -26,6 +26,13 @@ import DocsCardGrid from '../../components/docs/DocsCardGrid.astro';
   <Badge text="stdio + authenticated HTTP" variant="tip" />
   <Badge text="Activity Evidence for guild builds" variant="success" />
   <Badge text="Pre-1.0" variant="caution" />
+</p>
+
+<p class="product-intro">
+  <strong>discord-mcp</strong> is an open-source <strong>Model Context Protocol (MCP) server for Discord</strong>
+  published by <a href="https://github.com/cappyeo">cappyeo</a>. Read the source at
+  <a href="https://github.com/cappyeo/discord-mcp">github.com/cappyeo/discord-mcp</a> or install
+  the CLI package from <a href="https://www.npmjs.com/package/@discord-mcp/cli">npm</a>.
 </p>
 
 ## From intent to verified Discord work
@@ -135,6 +142,33 @@ one complete plan, approval, apply, resume, and Activity Evidence lifecycle in a
 Requires Node.js 22.12 or newer. You also need a Discord bot installed in a test server.
 [Follow the setup tutorial →](/discord-mcp/start/) or
 [go directly to the verified-outcome track →](/discord-mcp/start/activity-evidence/)
+
+## Common questions
+
+### What is discord-mcp?
+
+It is a Discord MCP server that gives an AI client typed tools for reading and operating Discord
+through a bot you own. The project is published by cappyeo and the canonical source is the
+[cappyeo/discord-mcp repository](https://github.com/cappyeo/discord-mcp).
+
+### Which AI clients can use it?
+
+It works with Claude Desktop, Claude Code, Codex, Cursor, and other MCP-compatible clients. Use the
+[client setup guide](/discord-mcp/start/client-setup/) for the matching configuration.
+
+### Does it use a Discord user account?
+
+No. discord-mcp uses a caller-owned Discord bot and is not an official Discord product. It cannot
+do more than that bot can do, so bot roles and channel overrides remain the access boundary.
+Review [the safe baseline](/discord-mcp/operations/configure/) before connecting a production guild.
+
+### Can I run it locally or over HTTP?
+
+Yes. The default mode runs locally as a stdio child process. You can also self-host an
+authenticated Streamable HTTP endpoint; there is no hosted bot relay or separate discord-mcp
+account. Follow [the connection mode guide](/discord-mcp/operations/clients/) and keep the endpoint
+behind HTTPS and authentication, grant least-privilege bot permissions, and validate in a test guild. Ordinary writes can
+execute immediately; only tools marked **Confirmation required** use the two-part confirmation gate.
 
 ## Inspect before connecting
 
