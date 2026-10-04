@@ -76,7 +76,7 @@
     "@modelcontextprotocol/client": "^2.2.0",
     "@modelcontextprotocol/ext-apps": "2.0.3",
     "@modelcontextprotocol/server": "^2.2.0",
-    "@mswjs/interceptors": "^0.45.0",
+    "@mswjs/interceptors": "^0.45.6",
     "@opentelemetry/context-async-hooks": "^2.11.0",
     "@opentelemetry/sdk-metrics": "^2.11.0",
     "@opentelemetry/sdk-trace-base": "^2.11.0",
