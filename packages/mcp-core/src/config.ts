@@ -14,6 +14,10 @@ const ConfigSchema = z.object({
   MCP_EVENTS_SOCKET: z.string().min(1).optional(),
   MCP_EVENTS_OWNER: z.string().min(1).max(256).optional(),
   MCP_EVENTS_STATE_DIR: z.string().min(1).optional(),
+  MCP_EVENTS_GUILD_ID: z
+    .string()
+    .regex(/^\d{17,20}$/)
+    .optional(),
   MCP_EVENTS_AUTHOR_ID: z
     .string()
     .regex(/^\d{17,20}$/)

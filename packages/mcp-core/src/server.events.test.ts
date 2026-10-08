@@ -49,6 +49,22 @@ it('advertises Events and preserves progressive tools across concurrent MCP sess
       expect(search.structuredContent).toMatchObject({
         matches: [{ name: 'events_dm_reply', dispatcher: 'mcp_tools_write' }],
       });
+      const guildSearch = await client.callTool({
+        name: 'mcp_tools_search',
+        arguments: { query: 'events_message_reply' },
+      });
+      expect(guildSearch.structuredContent).toMatchObject({
+        matches: [{ name: 'events_message_reply', dispatcher: 'mcp_tools_write' }],
+      });
+      expect(
+        await client.callTool({
+          name: 'mcp_tools_write',
+          arguments: {
+            tool: 'events_message_reply',
+            args: { event_id: 'discord_mention_111122223333444484', content: 'Public reply' },
+          },
+        }),
+      ).toMatchObject({ structuredContent: { status: 'sent' } });
       expect(
         await client.callTool({
           name: 'mcp_tools_read',
@@ -66,6 +82,7 @@ it('advertises Events and preserves progressive tools across concurrent MCP sess
       ).toMatchObject({ structuredContent: { status: 'sent' } });
     }
     expect(call.mock.calls.filter((c) => c[0] === 'dm/reply')).toHaveLength(3);
+    expect(call.mock.calls.filter((c) => c[0] === 'message/reply')).toHaveLength(3);
   } finally {
     await Promise.all(clients.map((c) => c.close()));
   }

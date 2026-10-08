@@ -24,6 +24,7 @@ exports[`config surface > declares the frozen set of schema keys, optional ones 
   "MCP_CIRCUIT_HALF_OPEN_AFTER_MS",
   "MCP_DM_CONSENT_MODE",
   "MCP_EVENTS_AUTHOR_ID",
+  "MCP_EVENTS_GUILD_ID",
   "MCP_EVENTS_OWNER",
   "MCP_EVENTS_SOCKET",
   "MCP_EVENTS_STATE_DIR",

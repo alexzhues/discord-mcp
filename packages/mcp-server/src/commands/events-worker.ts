@@ -52,6 +52,15 @@ export async function eventsWorkerAction(): Promise<void> {
   const socket = config.MCP_EVENTS_SOCKET;
   const owner = config.MCP_EVENTS_OWNER;
   const authorId = config.MCP_EVENTS_AUTHOR_ID;
+  const guildId = config.MCP_EVENTS_GUILD_ID;
+  if (
+    guildId &&
+    config.ALLOWED_GUILDS &&
+    !config.ALLOWED_GUILDS.split(',')
+      .map((id) => id.trim())
+      .includes(guildId)
+  )
+    throw new Error('Events guild must be inside ALLOWED_GUILDS');
   if (
     !directory?.startsWith('/') ||
     !socket ||
@@ -71,7 +80,10 @@ export async function eventsWorkerAction(): Promise<void> {
   let runtime: DmEventRuntime | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
   const client = new Client({
-    intents: [GatewayIntentBits.DirectMessages],
+    intents: [
+      GatewayIntentBits.DirectMessages,
+      ...(guildId ? [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] : []),
+    ],
     partials: [Partials.Channel],
   });
   let fatal = false;
@@ -107,6 +119,8 @@ export async function eventsWorkerAction(): Promise<void> {
         'events/unsubscribe',
         'dm/context',
         'dm/reply',
+        'message/context',
+        'message/reply',
       ].includes(envelope.method)
         ? envelope.method
         : 'unknown';
@@ -172,6 +186,7 @@ export async function eventsWorkerAction(): Promise<void> {
       owner,
       authorId: authorId!,
       botId: config.DISCORD_EXPECTED_BOT_ID,
+      ...(guildId ? { guildId } : {}),
       rest: api,
     });
     client.on('messageCreate', (message) => {
@@ -185,6 +200,8 @@ export async function eventsWorkerAction(): Promise<void> {
         ...(message.guildId ? { guild_id: message.guildId } : {}),
         type: message.type,
         attachments: [...message.attachments.values()],
+        mentioned_user_ids: [...message.mentions.users.keys()],
+        ...(message.webhookId ? { webhook_id: message.webhookId } : {}),
         ...(message.reference
           ? {
               message_reference: {
@@ -229,7 +246,7 @@ export async function eventsWorkerAction(): Promise<void> {
     process.on('SIGINT', () => {
       void stop();
     });
-    process.stderr.write('Discord DM Events worker ready.\n');
+    process.stderr.write('Discord message Events worker ready.\n');
   } catch {
     await stop();
     throw new Error('Events worker startup failed');

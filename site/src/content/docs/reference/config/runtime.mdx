@@ -31,7 +31,7 @@ Logs use stderr because stdout is reserved for stdio JSON-RPC.
 
 These settings enable a separate supervised `discord-mcp events-worker`. MCP
 sessions connect to its protected Unix socket and never start additional DM
-listeners. Existing installations omit all four settings. The first version is
+listeners. Existing installations omit these optional settings. The first version is
 for one verified human Discord account and an existing ChatGPT dot subscribing
 through its own private plugin. Keep progressive tool disclosure enabled.
 
@@ -62,3 +62,15 @@ through its own private plugin. Keep progressive tool disclosure enabled.
 - **Default:** unset
 - **Use:** The independently verified human account whose plain-text one-to-one DMs can produce `message.created` events. The worker rejects other authors, bots, guild/group conversations and attachments. Do not use the authenticated bot's user ID here.
 - **Example:** `MCP_EVENTS_AUTHOR_ID=123456789012345678`
+
+### `MCP_EVENTS_GUILD_ID`
+
+- **Type:** Discord snowflake with 17–20 digits
+- **Default:** unset, so guild mentions are disabled
+- **Use:** Authorize `message.mentioned` for one guild. Any non-bot human's actual direct user mention of the identity-locked bot can trigger the existing dot in accessible message-bearing channels and threads. The guild must also be inside `ALLOWED_GUILDS` when that policy is configured. The worker adds Guilds/GuildMessages intents; it does not request privileged Message Content intent. Untagged messages, role/everyone tags and webhooks are ignored.
+- **Example:** `MCP_EVENTS_GUILD_ID=123456789012345678`
+
+Use `events_message_context` and `events_message_reply` for a delivered mention's
+originating conversation. The DM subscription and DM-specific tools remain
+unchanged. A community mention authorizes ordinary shared-channel assistance;
+it does not grant other members access to the operator's private memory or tools.

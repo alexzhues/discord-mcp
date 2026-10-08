@@ -96,6 +96,13 @@ describe('redactArgs (Plan 8 Phase F - per-tool + recursive)', () => {
       expect(out.content).toBe('[REDACTED:11ch]');
     });
 
+    it('events_message_reply never persists shared-channel reply text', () => {
+      expect(redactArgs({ event_id: 'event', content: 'secret' }, 'events_message_reply')).toEqual({
+        event_id: 'event',
+        content: '[REDACTED:6ch]',
+      });
+    });
+
     it('events_dm_reply never persists reply text', () => {
       expect(redactArgs({ event_id: 'event', content: 'secret' }, 'events_dm_reply')).toEqual({
         event_id: 'event',
@@ -315,6 +322,7 @@ describe('redactArgs (Plan 8 Phase F - per-tool + recursive)', () => {
         'app_emojis_create',
         'messages_send',
         'events_dm_reply',
+        'events_message_reply',
         'messages_edit',
         'messages_compose',
         'messages_publish',

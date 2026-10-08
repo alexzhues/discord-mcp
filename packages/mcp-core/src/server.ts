@@ -18,7 +18,7 @@ import type { Config } from './config.js';
 import { type DiscordRuntime, runWithDiscordRuntime } from './container.js';
 import { formatErrorForUser } from './errors/format.js';
 import type { EventBridge } from './events/contract.js';
-import { DmContext, DmReply } from './events/tools.js';
+import { DmContext, DmReply, MessageContext, MessageReply } from './events/tools.js';
 import { SubscriptionRegistry } from './gateway/subscription_registry.js';
 import { verifyExpectedBotIdentity } from './identity-lock.js';
 import { auditMiddleware } from './middleware/audit.js';
@@ -1693,6 +1693,8 @@ export async function buildServer(deps: BuildServerDeps): Promise<BuildServerRes
     for (const [name, piece] of [
       ['events_dm_context', DmContext],
       ['events_dm_reply', DmReply],
+      ['events_message_context', MessageContext],
+      ['events_message_reply', MessageReply],
     ] as const) {
       const EventTool = piece as unknown as new (
         ...args: ConstructorParameters<typeof Tool>

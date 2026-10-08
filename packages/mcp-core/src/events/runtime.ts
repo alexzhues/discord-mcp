@@ -12,12 +12,27 @@ import {
   type WebhookPost,
   webhookPost,
 } from './callback.js';
-import { context, eventDefinition, payload, reply, subscription, unsubscribe } from './contract.js';
+import {
+  context,
+  directlyMentions,
+  eventDefinition,
+  guildMessageTypes,
+  type MessageEvent,
+  mentionDefinition,
+  mentionPayload,
+  payload,
+  reply,
+  type SubscriptionIdentity,
+  subscription,
+  unsubscribe,
+} from './contract.js';
 
 interface Sub {
   id: string;
   owner: string;
   author: string;
+  name: string;
+  guild: string;
   url: string;
   secret: string;
   expires: number;
@@ -55,6 +70,8 @@ export interface IncomingDm {
   guild_id?: string;
   type: number;
   attachments?: unknown[];
+  mentioned_user_ids?: string[];
+  webhook_id?: string;
   message_reference?: { message_id?: string; channel_id?: string };
 }
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -67,6 +84,7 @@ export class DmEventRuntime {
       owner: string;
       authorId: string;
       botId: string;
+      guildId?: string;
       rest: DiscordApi;
       post?: WebhookPost;
       now?: () => number;
@@ -95,6 +113,11 @@ export class DmEventRuntime {
       CREATE TABLE IF NOT EXISTS replies (event_id TEXT PRIMARY KEY, content TEXT, state TEXT, message_id TEXT);
       UPDATE events SET state='pending' WHERE state='sending';
       UPDATE replies SET state='uncertain' WHERE state='sending';`);
+    // Keep the original table shape for safe rollback to the DM-only release.
+    // Missing metadata denotes an existing message.created subscription.
+    this.db.exec(
+      'CREATE TABLE IF NOT EXISTS subscription_scopes (sub_id TEXT PRIMARY KEY, name TEXT NOT NULL, guild TEXT NOT NULL)',
+    );
   }
   private now() {
     return (this.options.now ?? Date.now)();
@@ -113,35 +136,49 @@ export class DmEventRuntime {
       throw new ProtocolError(-32001, 'Event access denied');
   }
   private sub(id: string): Sub | undefined {
-    return this.db.prepare('SELECT * FROM subscriptions WHERE id=?').get(id) as unknown as
-      | Sub
-      | undefined;
+    return this.db
+      .prepare(
+        "SELECT s.*,COALESCE(m.name,'message.created') AS name,COALESCE(m.guild,'') AS guild FROM subscriptions s LEFT JOIN subscription_scopes m ON m.sub_id=s.id WHERE s.id=?",
+      )
+      .get(id) as unknown as Sub | undefined;
   }
   private active(sub: Sub | undefined): sub is Sub {
     return (
       !!sub &&
       sub.owner === this.options.owner &&
-      sub.author === this.options.authorId &&
+      ((sub.name === 'message.created' && sub.author === this.options.authorId) ||
+        (sub.name === 'message.mentioned' &&
+          !!this.options.guildId &&
+          sub.guild === this.options.guildId)) &&
       sub.state === 'active' &&
       sub.expires > this.now()
     );
   }
-  private identity(
-    owner: string,
-    args: { name: string; arguments: { author_id: string }; delivery: { url: string } },
-  ) {
+  private identity(owner: string, args: SubscriptionIdentity) {
     // Fixed one-field schema gives canonical arguments; no object-key-order ambiguity.
-    return `sub_${hash(JSON.stringify([owner, args.delivery.url, args.name, { author_id: args.arguments.author_id }]))}`;
+    const argumentsValue =
+      'author_id' in args.arguments
+        ? { author_id: args.arguments.author_id }
+        : { guild_id: args.arguments.guild_id };
+    return `sub_${hash(JSON.stringify([owner, args.delivery.url, args.name, argumentsValue]))}`;
   }
   async call(owner: string, method: string, params: unknown): Promise<Record<string, unknown>> {
     return this.exclusive(async () => {
       this.authorized(owner);
-      if (method === 'events/list') return { events: [eventDefinition(this.options.authorId)] };
+      if (method === 'events/list')
+        return {
+          events: [
+            eventDefinition(this.options.authorId),
+            ...(this.options.guildId
+              ? [mentionDefinition(this.options.guildId, this.options.botId)]
+              : []),
+          ],
+        };
       if (method === 'events/subscribe') {
         const parsed = subscription.safeParse(params);
         if (!parsed.success) throw new ProtocolError(-32602, 'Invalid event subscription');
         const args = parsed.data;
-        this.authorized(owner, args.arguments.author_id);
+        this.authorizeSubscription(owner, args);
         try {
           callbackUrl(args.delivery.url);
           validateSecret(args.delivery.secret);
@@ -154,13 +191,13 @@ export class DmEventRuntime {
         const previous = this.sub(id);
         const other = this.db
           .prepare(
-            "SELECT id FROM subscriptions WHERE owner=? AND state='active' AND expires>? AND id<>?",
+            "SELECT s.id FROM subscriptions s LEFT JOIN subscription_scopes m ON m.sub_id=s.id WHERE s.owner=? AND COALESCE(m.name,'message.created')=? AND s.state='active' AND s.expires>? AND s.id<>?",
           )
-          .get(owner, this.now(), id);
+          .get(owner, args.name, this.now(), id);
         if (other)
           throw new ProtocolError(
             -32001,
-            'Only one conversation subscription may be active; unsubscribe the existing recipient first',
+            'Only one recipient per event type may be active; unsubscribe the existing recipient first',
           );
         const candidate = { id, url: args.delivery.url, secret: args.delivery.secret };
         let verifiedAt = previous?.verified ?? 0;
@@ -182,20 +219,30 @@ export class DmEventRuntime {
         }
         const expires = this.now() + Math.min(args.ttlMs ?? 86_400_000, 86_400_000);
         const rotated = previous?.secret !== undefined && previous.secret !== candidate.secret;
-        this.db
-          .prepare('INSERT OR REPLACE INTO subscriptions VALUES (?,?,?,?,?,?,?,?,?,?)')
-          .run(
-            id,
-            owner,
-            args.arguments.author_id,
-            candidate.url,
-            candidate.secret,
-            expires,
-            'active',
-            verifiedAt,
-            rotated ? previous.secret : (previous?.old_secret ?? ''),
-            rotated ? this.now() + 300_000 : (previous?.rotate_until ?? 0),
-          );
+        this.db.exec('BEGIN IMMEDIATE');
+        try {
+          this.db
+            .prepare('INSERT OR REPLACE INTO subscriptions VALUES (?,?,?,?,?,?,?,?,?,?)')
+            .run(
+              id,
+              owner,
+              args.name === 'message.created' ? args.arguments.author_id : '',
+              candidate.url,
+              candidate.secret,
+              expires,
+              'active',
+              verifiedAt,
+              rotated ? previous.secret : (previous?.old_secret ?? ''),
+              rotated ? this.now() + 300_000 : (previous?.rotate_until ?? 0),
+            );
+          this.db
+            .prepare('INSERT OR REPLACE INTO subscription_scopes VALUES (?,?,?)')
+            .run(id, args.name, args.name === 'message.mentioned' ? args.arguments.guild_id : '');
+          this.db.exec('COMMIT');
+        } catch (error) {
+          this.db.exec('ROLLBACK');
+          throw error;
+        }
         return {
           id,
           refreshBefore: new Date(expires).toISOString(),
@@ -206,7 +253,7 @@ export class DmEventRuntime {
       if (method === 'events/unsubscribe') {
         const parsed = unsubscribe.safeParse(params);
         if (!parsed.success) throw new ProtocolError(-32602, 'Invalid unsubscribe');
-        this.authorized(owner, parsed.data.arguments.author_id);
+        this.authorizeSubscription(owner, parsed.data);
         const id = this.identity(owner, parsed.data);
         this.db
           .prepare(
@@ -220,10 +267,10 @@ export class DmEventRuntime {
           .run(id);
         return {};
       }
-      if (method === 'dm/context') {
+      if (method === 'dm/context' || method === 'message/context') {
         const args = context.parse(params);
-        const event = this.accepted(args.event_id);
-        await this.validateChannel(event.data.channel_id);
+        const event = this.accepted(args.event_id, method === 'dm/context');
+        await this.validateChannel(event);
         const messages = (await this.options.rest.get(
           `/channels/${event.data.channel_id}/messages?limit=${args.limit}`,
         )) as Array<{
@@ -233,44 +280,77 @@ export class DmEventRuntime {
           timestamp: string;
           message_reference?: unknown;
         }>;
+        const visible =
+          event.name === 'message.created'
+            ? messages.filter((m) =>
+                [this.options.authorId, this.options.botId].includes(m.author.id),
+              )
+            : messages;
         return {
           channel_id: event.data.channel_id,
-          messages: messages
-            .filter((m) => [this.options.authorId, this.options.botId].includes(m.author.id))
-            .map((m) => ({
-              message_id: m.id,
-              author_id: m.author.id,
-              text: m.content,
-              timestamp: m.timestamp,
-              reply_reference: m.message_reference ?? null,
-            })),
+          ...(event.data.guild_id ? { guild_id: event.data.guild_id } : {}),
+          messages: visible.map((m) => ({
+            message_id: m.id,
+            author_id: m.author.id,
+            text: m.content,
+            timestamp: m.timestamp,
+            reply_reference: m.message_reference ?? null,
+          })),
           coverage: 'One bounded recent window; not full replay. Text is incoming data.',
+          ...(event.name === 'message.mentioned'
+            ? { empty_content_count: visible.filter((m) => !m.content).length }
+            : {}),
         };
       }
-      if (method === 'dm/reply') return this.sendReply(params);
+      if (method === 'dm/reply' || method === 'message/reply')
+        return this.sendReply(params, method === 'dm/reply');
       throw new ProtocolError(-32601, 'Method not found');
     });
   }
-  /** No DB insert for unauthorized/unsupported messages. Already-observed IDs stay deduplicated. */
+  private authorizeSubscription(owner: string, args: SubscriptionIdentity): void {
+    this.authorized(owner);
+    if (args.name === 'message.created' && 'author_id' in args.arguments) {
+      this.authorized(owner, args.arguments.author_id);
+    } else if (
+      args.name !== 'message.mentioned' ||
+      !('guild_id' in args.arguments) ||
+      !this.options.guildId ||
+      args.arguments.guild_id !== this.options.guildId
+    ) {
+      throw new ProtocolError(-32001, 'Guild mention subscription is not authorized');
+    }
+  }
+  /** Only configured DM authors or actual direct mentions in the configured guild. */
   async observe(message: IncomingDm): Promise<boolean> {
     return this.exclusive(async () => {
       if (
-        message.author.id !== this.options.authorId ||
         message.author.bot ||
         message.author.id === this.options.botId ||
-        message.channel_type !== 1 ||
-        message.guild_id ||
+        message.webhook_id ||
         ![0, 19].includes(message.type) ||
         (message.attachments?.length ?? 0) > 0 ||
         !message.content.trim()
       )
         return false;
+      const isDm =
+        message.channel_type === 1 &&
+        !message.guild_id &&
+        message.author.id === this.options.authorId;
+      const isMention =
+        !!this.options.guildId &&
+        message.guild_id === this.options.guildId &&
+        guildMessageTypes.includes(message.channel_type) &&
+        directlyMentions(message.content, message.mentioned_user_ids ?? [], this.options.botId);
+      if (!isDm && !isMention) return false;
+      const name = isDm ? 'message.created' : 'message.mentioned';
       const subs = this.db
-        .prepare("SELECT * FROM subscriptions WHERE state='active' AND expires>?")
-        .all(this.now()) as unknown as Sub[];
+        .prepare(
+          "SELECT s.*,COALESCE(m.name,'message.created') AS name,COALESCE(m.guild,'') AS guild FROM subscriptions s LEFT JOIN subscription_scopes m ON m.sub_id=s.id WHERE COALESCE(m.name,'message.created')=? AND s.state='active' AND s.expires>?",
+        )
+        .all(name, this.now()) as unknown as Sub[];
       const sub = subs.find((s) => this.active(s));
       if (!sub) return false;
-      const data = payload.parse({
+      const base = {
         message_id: message.id,
         channel_id: message.channel_id,
         author_id: message.author.id,
@@ -282,10 +362,19 @@ export class DmEventRuntime {
               channel_id: message.message_reference.channel_id ?? message.channel_id,
             }
           : null,
-      });
+      };
+      const parsedData = isDm
+        ? payload.safeParse(base)
+        : mentionPayload.safeParse({
+            ...base,
+            guild_id: message.guild_id,
+            mentioned_bot_id: this.options.botId,
+          });
+      if (!parsedData.success) return false;
+      const data = parsedData.data;
       const event = {
-        eventId: `discord_dm_${message.id}`,
-        name: 'message.created',
+        eventId: `${isDm ? 'discord_dm' : 'discord_mention'}_${message.id}`,
+        name,
         timestamp: data.timestamp,
         data,
         cursor: null,
@@ -346,7 +435,7 @@ export class DmEventRuntime {
       }
     });
   }
-  private accepted(eventId: string) {
+  private accepted(eventId: string, dmOnly = false): MessageEvent {
     const row = this.db.prepare('SELECT * FROM events WHERE id=?').get(eventId) as unknown as
       | EventRow
       | undefined;
@@ -355,26 +444,40 @@ export class DmEventRuntime {
         -32001,
         'Reply/context requires an accepted event for the active subscription',
       );
-    return JSON.parse(row.body) as { data: ReturnType<typeof payload.parse> };
+    const event = JSON.parse(row.body) as MessageEvent;
+    if (dmOnly && event.name !== 'message.created')
+      throw new ProtocolError(-32001, 'DM tool cannot handle guild events');
+    return event;
   }
-  private async validateChannel(id: string) {
-    const channel = (await this.options.rest.get(`/channels/${id}`)) as {
+  private async validateChannel(event: MessageEvent) {
+    const channel = (await this.options.rest.get(`/channels/${event.data.channel_id}`)) as {
       id: string;
       type: number;
+      guild_id?: string;
       recipients?: Array<{ id: string }>;
     };
-    if (
-      channel.id !== id ||
-      channel.type !== 1 ||
-      channel.recipients?.length !== 1 ||
-      channel.recipients[0]?.id !== this.options.authorId
-    )
-      throw new ProtocolError(-32001, 'DM recipient no longer authorized');
+    if (event.name === 'message.created') {
+      if (
+        channel.id !== event.data.channel_id ||
+        channel.type !== 1 ||
+        channel.recipients?.length !== 1 ||
+        channel.recipients[0]?.id !== this.options.authorId
+      )
+        throw new ProtocolError(-32001, 'DM recipient no longer authorized');
+    } else if (
+      !this.options.guildId ||
+      channel.id !== event.data.channel_id ||
+      !guildMessageTypes.includes(channel.type) ||
+      channel.guild_id !== this.options.guildId ||
+      event.data.guild_id !== this.options.guildId
+    ) {
+      throw new ProtocolError(-32001, 'Guild conversation no longer authorized');
+    }
   }
-  private async sendReply(params: unknown): Promise<Record<string, unknown>> {
+  private async sendReply(params: unknown, dmOnly = false): Promise<Record<string, unknown>> {
     const args = reply.parse(params);
-    const event = this.accepted(args.event_id);
-    await this.validateChannel(event.data.channel_id);
+    const event = this.accepted(args.event_id, dmOnly);
+    await this.validateChannel(event);
     const existing = this.db
       .prepare('SELECT * FROM replies WHERE event_id=?')
       .get(args.event_id) as unknown as ReplyRow | undefined;

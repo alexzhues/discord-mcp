@@ -20,6 +20,12 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import {
+  DmContext,
+  DmReply,
+  MessageContext,
+  MessageReply,
+} from '../../packages/mcp-core/src/events/tools.js';
 import { loadAllTools } from './generate-tool-docs.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -80,6 +86,11 @@ describe('hand-written docs only reference registered tools', () => {
   it('every backticked category-prefixed identifier is a real tool', async () => {
     const tools = await loadAllTools();
     const registered = new Set(tools.map((t) => t.name));
+    // The optional Events bridge registers these real tool classes separately
+    // from the compatibility catalog; derive names from their actual metadata.
+    for (const tool of [DmContext, DmReply, MessageContext, MessageReply]) {
+      registered.add((tool as unknown as { __toolMetadata: { name: string } }).__toolMetadata.name);
+    }
     expect(registered.size).toBeGreaterThan(150);
 
     // A prefix is "known" only when some registered tool actually uses it, so
@@ -134,6 +145,11 @@ describe('tool names inside code examples', () => {
   it('every `"tool": "..."` in a worked example is a real tool', async () => {
     const tools = await loadAllTools();
     const registered = new Set(tools.map((t) => t.name));
+    // The optional Events bridge registers these real tool classes separately
+    // from the compatibility catalog; derive names from their actual metadata.
+    for (const tool of [DmContext, DmReply, MessageContext, MessageReply]) {
+      registered.add((tool as unknown as { __toolMetadata: { name: string } }).__toolMetadata.name);
+    }
     const files = DOC_ROOTS.flatMap((d) => walk(d));
 
     const bad: string[] = [];
@@ -151,6 +167,11 @@ describe('tool names inside code examples', () => {
   it('every tool-shaped identifier in a mermaid diagram is a real tool', async () => {
     const tools = await loadAllTools();
     const registered = new Set(tools.map((t) => t.name));
+    // The optional Events bridge registers these real tool classes separately
+    // from the compatibility catalog; derive names from their actual metadata.
+    for (const tool of [DmContext, DmReply, MessageContext, MessageReply]) {
+      registered.add((tool as unknown as { __toolMetadata: { name: string } }).__toolMetadata.name);
+    }
     const prefixes = new Set(
       tools.filter((t) => t.name.startsWith(`${t.category}_`)).map((t) => t.category),
     );

@@ -38,7 +38,7 @@ polls are skipped. On restart, interrupted deliveries return to pending and
 interrupted replies become uncertain. Closing or recreating an MCP session has
 no effect on the worker or stored subscriptions.
 
-Only non-bot authors matching `MCP_EVENTS_AUTHOR_ID`, in a one-to-one DM, with
+For the DM event, only non-bot authors matching `MCP_EVENTS_AUTHOR_ID`, in a one-to-one DM, with
 plain text and normal/reply message types are accepted. Guild and group messages,
 attachments, voice messages and empty text are ignored. `DirectMessages` is the
 only Gateway intent requested; `Partials.Channel` enables uncached DM channels.
@@ -53,7 +53,7 @@ No privileged Message Content intent is needed for this DM listener.
   `ttlMs` and `cursor: null`. Only the configured principal/author may subscribe.
 - The stable subscription ID hashes the trusted principal, callback URL, event
   name and canonical validated arguments. Identical requests refresh one record.
-- Only one recipient callback may be active for this single-account deployment.
+- Only one recipient callback per event type may be active for this single-account deployment.
   Stop the original subscription before changing the receiving conversation.
 - Verification uses a fresh random challenge, a signed HTTPS POST, a ten-second
   challenge window, a successful response and constant-time echo comparison.
@@ -177,8 +177,8 @@ ChatGPT may batch events or delay task execution. Reply latency is not bounded b
 webhook acknowledgement. Approval rules for consequential actions still apply.
 A private subscription is verified by its actual creation context and activity,
 not by a bot name. Sharing this plugin to other accounts requires a new principal
-and authorization design. Attachments, server mentions, other users and voice are
-outside this version.
+and authorization design. Attachments and voice media remain outside this version. Guild mentions from
+other humans are covered by the opt-in extension below.
 
 ## Migration and rollback
 
@@ -211,3 +211,58 @@ Sources: [OpenAI MCP Events](https://developers.openai.com/plugins/build/mcp-eve
 [dot setup](https://learn.chatgpt.com/docs/dots/getting-started),
 [Discord Gateway](https://docs.discord.com/developers/events/gateway),
 [Discord messages](https://docs.discord.com/developers/resources/message).
+
+## Extension: direct guild mentions
+
+Set optional `MCP_EVENTS_GUILD_ID` in the worker to enable `message.mentioned` for
+one authorized guild. It must agree with `ALLOWED_GUILDS` if that policy is set.
+The same worker adds Guilds/GuildMessages intents and continues listening to DMs;
+no second Gateway client, queue or delivery worker is introduced. Existing DM
+subscriptions keep their IDs, callback keys, queue records and reply ledger.
+Subscription metadata lives in a separate additive table, leaving the original
+subscription table shape usable by the previous release during rollback.
+
+`message.mentioned` has a strict `{guild_id}` subscription filter. Its payload
+adds `guild_id` and `mentioned_bot_id` to the message fields. There is one active
+recipient per event type: the actual dot can have its DM and guild subscriptions
+simultaneously. Only the configured guild is eligible, without a frozen channel
+list; future accessible channels are covered automatically. Normal text and
+announcement channels, voice-channel text chats and accessible public/private/
+announcement threads are supported (forum/media posts use threads). Discord's
+current permissions govern access and writes. Media/voice attachments remain
+outside the text-only scope.
+
+A trigger requires BOTH Discord's user-mention list to include the locked bot and
+an actual `<@bot-id>` or `<@!bot-id>` token in the message content. Display names,
+role tags, everyone/here tags and implicit reply references do not suffice. Bots,
+the bot's own output, webhooks and other guilds are rejected. The listener receives
+Gateway messages to filter them, but unmentioned messages are not persisted or
+forwarded. Direct mentions have a content-intent exemption; this worker does not
+request privileged Message Content intent. Bounded history may have blank message
+content if the bot application's Message Content access is unavailable. The context
+result reports the number of empty bodies. It never assumes missing text means
+there was no message.
+
+Discover `events_message_context` through `mcp_tools_search` and invoke it through
+`mcp_tools_read` with `{event_id, limit:20}`. It reads at most 30 recent messages
+from that accepted event's channel/thread, including the conversation's other
+participants. `events_message_reply` through `mcp_tools_write` takes `{event_id,
+content}` and binds the destination and reply reference to that same accepted
+conversation. The worker rechecks the live guild/channel. Neither tool accepts an
+arbitrary channel ID or exposes private DM history for a guild event. The older
+DM-specific tools explicitly reject guild events. Mention replies reuse the same
+reply ledger, nonce protection, mention suppression and uncertain-send handling.
+The seven progressive top-level tools remain unchanged.
+
+Subscribe from the existing dot's own custom-plugin Events workflow, preserving
+its existing DM task. Instruct it to reply in the originating channel when directly
+mentioned by a human in that guild. Shared-server messages must not disclose the
+operator's private memories, DMs, credentials or connected private data. Other
+members' requests authorize ordinary conversation, not account changes or use of
+private tools; those still require the operator's explicit authorization. Do not
+use a dot name in event data as a routing mechanism.
+
+Roll back by stopping the mention subscription first, then returning the ONE
+worker and MCP launcher to the previous release, with guild configuration unset.
+Retain protected state. The prior DM subscription can continue; do not run old
+and new listeners concurrently against the same bot.
