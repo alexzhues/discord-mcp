@@ -2,6 +2,12 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  return { ...actual, homedir: () => process.env.XDG_CONFIG_HOME ?? actual.homedir() };
+});
+
 import { recordActivity, resolveActivityPath } from '../lib/activity.js';
 import { activityAction } from './activity.js';
 

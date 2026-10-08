@@ -8,6 +8,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// macOS uses homedir rather than XDG_CONFIG_HOME for default Activity paths.
+// Keep those production calls inside this suite's existing temporary root.
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  return { ...actual, homedir: () => process.env.XDG_CONFIG_HOME ?? actual.homedir() };
+});
+
 import { readActivity, resolveActivityPath } from '../lib/activity.js';
 import { hasValidBearerToken, startHttp } from './http.js';
 

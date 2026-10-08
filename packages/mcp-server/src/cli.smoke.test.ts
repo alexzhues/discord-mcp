@@ -28,13 +28,17 @@ const cliPath = join(here, '..', 'dist', 'cli.js');
 function runCli(
   args: string[],
   extraEnv: NodeJS.ProcessEnv = {},
+  isolateHome = false,
 ): {
   stdout: string;
   stderr: string;
   status: number | null;
 } {
   try {
-    const stdout = execFileSync(process.execPath, [cliPath, ...args], {
+    const preload = isolateHome
+      ? ['--require', join(here, '..', 'test-fixtures', 'activity-home.cjs')]
+      : [];
+    const stdout = execFileSync(process.execPath, [...preload, cliPath, ...args], {
       encoding: 'utf8',
       env: { PATH: process.env.PATH ?? '', DISCORD_MCP_ACTIVITY: 'off', ...extraEnv },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -126,10 +130,10 @@ describe('cli binary smoke (post-build)', () => {
     const appData = mkdtempSync(join(tmpdir(), 'discord-mcp-cli-activity-'));
     const env = { APPDATA: appData, XDG_CONFIG_HOME: appData, DISCORD_MCP_ACTIVITY: '' };
     try {
-      const doctor = runCli(['doctor', '--json'], env);
+      const doctor = runCli(['doctor', '--json'], env, true);
       expect(doctor.status).toBe(2);
 
-      const activity = runCli(['activity', '--json'], env);
+      const activity = runCli(['activity', '--json'], env, true);
       expect(activity.status).toBe(0);
       const summary = JSON.parse(activity.stdout) as {
         data: { total: number; recent: Array<{ command: string; outcome: string }> };
@@ -137,7 +141,9 @@ describe('cli binary smoke (post-build)', () => {
       expect(summary.data.total).toBe(1);
       expect(summary.data.recent[0]).toMatchObject({ command: 'doctor', outcome: 'failure' });
 
-      const journal = readFileSync(join(appData, 'discord-mcp', 'activity.jsonl'), 'utf8');
+      const activityBase =
+        process.platform === 'darwin' ? join(appData, 'Library', 'Application Support') : appData;
+      const journal = readFileSync(join(activityBase, 'discord-mcp', 'activity.jsonl'), 'utf8');
       expect(journal).not.toContain('DISCORD_TOKEN');
       expect(journal).not.toContain('Bot ');
     } finally {
