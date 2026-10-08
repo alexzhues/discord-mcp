@@ -11,6 +11,7 @@ const boolish = (def = false) =>
 
 const ConfigSchema = z.object({
   // Optional single-account MCP Events deployment; omitted by existing installs.
+  MCP_EVENTS_CATALOG: z.enum(['all', 'dm', 'mentions']).default('all'),
   MCP_EVENTS_SOCKET: z.string().min(1).optional(),
   MCP_EVENTS_OWNER: z.string().min(1).max(256).optional(),
   MCP_EVENTS_STATE_DIR: z.string().min(1).optional(),

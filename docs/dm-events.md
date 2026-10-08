@@ -266,3 +266,11 @@ Roll back by stopping the mention subscription first, then returning the ONE
 worker and MCP launcher to the previous release, with guild configuration unset.
 Retain protected state. The prior DM subscription can continue; do not run old
 and new listeners concurrently against the same bot.
+
+Some client subscription interfaces currently expose only the first event schema
+for a plugin source even when the plugin page displays both. In that case, create
+a dedicated mentions MCP connection with `MCP_EVENTS_CATALOG=mentions` and let the
+existing DM connection continue unchanged. Both use the SAME owner/worker socket
+and the sole Gateway/delivery process. Discovery and subscribe/unsubscribe are
+restricted to the selected catalog at that connection boundary. The default
+`all` catalog remains available for clients supporting both event schemas.

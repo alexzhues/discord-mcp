@@ -74,3 +74,10 @@ Use `events_message_context` and `events_message_reply` for a delivered mention'
 originating conversation. The DM subscription and DM-specific tools remain
 unchanged. A community mention authorizes ordinary shared-channel assistance;
 it does not grant other members access to the operator's private memory or tools.
+
+### `MCP_EVENTS_CATALOG`
+
+- **Type:** `all`, `dm`, or `mentions`
+- **Default:** `all`
+- **Use:** Choose which Events a particular MCP connection advertises and permits subscribing to. A client that exposes only the first event in a source's schema can use separate `dm` and `mentions` plugin connections pointing to the same private worker socket. This does not create extra Discord listeners or delivery workers.
+- **Example:** `MCP_EVENTS_CATALOG=mentions`

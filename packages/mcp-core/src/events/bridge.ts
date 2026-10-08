@@ -3,10 +3,25 @@ import { ProtocolError } from '@modelcontextprotocol/server';
 import type { Config } from '../config.js';
 import type { EventBridge } from './contract.js';
 
-export function createEventBridge(socketPath: string, owner: string): EventBridge {
+export function createEventBridge(
+  socketPath: string,
+  owner: string,
+  catalog: 'all' | 'dm' | 'mentions' = 'all',
+): EventBridge {
+  const allowed =
+    catalog === 'all'
+      ? ['message.created', 'message.mentioned']
+      : [catalog === 'dm' ? 'message.created' : 'message.mentioned'];
   return {
     call: (method, params) =>
       new Promise((resolve, reject) => {
+        if (
+          (method === 'events/subscribe' || method === 'events/unsubscribe') &&
+          !allowed.includes(String((params as { name?: unknown })?.name))
+        ) {
+          reject(new ProtocolError(-32001, 'Event is unavailable on this MCP connection'));
+          return;
+        }
         const body = JSON.stringify({ owner, method, params });
         const req = request(
           {
@@ -32,6 +47,13 @@ export function createEventBridge(socketPath: string, owner: string): EventBridg
                   reject(
                     new ProtocolError(value.error.code, value.error.message, value.error.data),
                   );
+                else if (method === 'events/list')
+                  resolve({
+                    ...value.result,
+                    events: (value.result.events as Array<{ name: string }>).filter((event) =>
+                      allowed.includes(event.name),
+                    ),
+                  });
                 else resolve(value.result);
               } catch {
                 reject(new ProtocolError(-32603, 'Events worker response failed'));
@@ -50,5 +72,5 @@ export function eventBridgeFromConfig(config: Config): EventBridge | undefined {
   if (!socket && !owner) return undefined;
   if (!socket?.startsWith('/') || !owner)
     throw new Error('MCP_EVENTS_SOCKET and MCP_EVENTS_OWNER are required together');
-  return createEventBridge(socket, owner);
+  return createEventBridge(socket, owner, config.MCP_EVENTS_CATALOG);
 }
