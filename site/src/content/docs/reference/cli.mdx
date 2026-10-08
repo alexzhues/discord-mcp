@@ -658,3 +658,14 @@ This is the contract pipelines should consume. `data` is per-command
 `data.checks`, smoke's `data.steps`, init's `data.content`, migrate's
 `data.result`)
 and stable across versions within a major.
+
+## `events-worker`
+
+Run the single supervised listener and callback delivery worker for opt-in
+`message.created` DM subscriptions. Requires the four
+[DM Events settings](/discord-mcp/reference/config/runtime/#opt-in-direct-message-mcp-events),
+`DISCORD_TOKEN` and `DISCORD_EXPECTED_BOT_ID`. MCP sessions use the same owner and
+socket configuration; this command does not expose another network MCP endpoint.
+It requests only the Discord DirectMessages Gateway intent. Persistent SQLite
+state retains observed events and subscriptions across restart, but does not
+backfill messages sent while the listener is offline.

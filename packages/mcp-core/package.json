@@ -56,7 +56,9 @@
     "@opentelemetry/semantic-conventions": "^1.34.0",
     "cockatiel": "^3.2.1",
     "discord-api-types": "^0.38.55",
-    "pino": "^9.5.0"
+    "ipaddr.js": "^2.5.0",
+    "pino": "^9.5.0",
+    "standardwebhooks": "^1.1.1"
   },
   "peerDependencies": {
     "@discordjs/rest": "^2.4.0",

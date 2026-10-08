@@ -112,3 +112,5 @@ Ask questions in [Discussions](https://github.com/cappyeo/discord-mcp/discussion
 To develop locally, run `pnpm install`, `pnpm build`, then `pnpm test`. See [Contributing](CONTRIBUTING.md); use [MCP Inspector](https://github.com/modelcontextprotocol/inspector) to inspect tool discovery.
 
 Licensed under [Apache-2.0](LICENSE). Earlier releases retain their included licenses. The [Acceptable Use Policy](ACCEPTABLE-USE.md) governs community participation and support without changing the software license.
+
+Opt-in direct-message event subscriptions for an existing ChatGPT dot are described in [DM Events](docs/dm-events.md).

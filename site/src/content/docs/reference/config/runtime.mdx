@@ -26,3 +26,39 @@ variable when the MCP client config can set `env` but not command arguments.
 - **Example:** `LOG_LEVEL=debug`
 
 Logs use stderr because stdout is reserved for stdio JSON-RPC.
+
+## Opt-in direct-message MCP Events
+
+These settings enable a separate supervised `discord-mcp events-worker`. MCP
+sessions connect to its protected Unix socket and never start additional DM
+listeners. Existing installations omit all four settings. The first version is
+for one verified human Discord account and an existing ChatGPT dot subscribing
+through its own private plugin. Keep progressive tool disclosure enabled.
+
+### `MCP_EVENTS_SOCKET`
+
+- **Type:** string, absolute Unix-domain socket path
+- **Default:** unset
+- **Use:** Connect MCP event methods and focused DM tools to the supervised worker. Set this and `MCP_EVENTS_OWNER` together in the MCP launchers. The worker requires the path to be `worker.sock` inside its private state directory.
+- **Example:** `MCP_EVENTS_SOCKET=/absolute/private/events/worker.sock`
+
+### `MCP_EVENTS_OWNER`
+
+- **Type:** non-empty string, maximum 256 characters
+- **Default:** unset
+- **Use:** Stable private-account principal supplied by the trusted launcher. It owns subscriptions and must match across the MCP transports and worker. It is not a dot name or an event routing field. Multi-user OAuth deployments need a separate principal resolver.
+- **Example:** `MCP_EVENTS_OWNER=private-account`
+
+### `MCP_EVENTS_STATE_DIR`
+
+- **Type:** string, absolute directory path
+- **Default:** unset
+- **Use:** Protected persistent worker storage for subscriptions, callback signing keys, accepted events, delivery attempts and the reply ledger. The operator-owned directory must have mode 0700; database and socket use mode 0600. Backups contain secrets and message text.
+- **Example:** `MCP_EVENTS_STATE_DIR=/absolute/private/events`
+
+### `MCP_EVENTS_AUTHOR_ID`
+
+- **Type:** Discord snowflake with 17–20 digits
+- **Default:** unset
+- **Use:** The independently verified human account whose plain-text one-to-one DMs can produce `message.created` events. The worker rejects other authors, bots, guild/group conversations and attachments. Do not use the authenticated bot's user ID here.
+- **Example:** `MCP_EVENTS_AUTHOR_ID=123456789012345678`
